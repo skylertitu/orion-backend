@@ -1,10 +1,14 @@
 import db from '../../database/db.js'
 import { genId } from '../../common/utils/id.js'
 import { hashPassword, comparePassword } from '../../common/utils/password.js'
-import { isConfigured, supabaseUrl, supabaseAnonKey } from '../../common/config/supabase.js'
+import { isConfigured } from '../../common/config/supabase.js'
 
 export interface AuthUser {
-  id: string; name: string; username: string; email: string; role: string
+  id: string
+  name: string
+  username: string
+  email: string
+  role: string
 }
 
 export interface AuthResult {
@@ -13,10 +17,18 @@ export interface AuthResult {
 }
 
 export class AuthService {
+  private normalizeEmail(email: string): string {
+    return email.trim().toLowerCase()
+  }
+
   async register({ name, username, email, password }: { name: string; username: string; email: string; password: string }): Promise<AuthResult> {
-    const existing = db.prepare('SELECT id FROM users WHERE email = ? OR username = ?').get(email, username)
+    const normalizedName = name.trim()
+    const normalizedUsername = username.trim()
+    const normalizedEmail = this.normalizeEmail(email)
+
+    const existing = db.prepare('SELECT id FROM users WHERE email = ? OR username = ?').get(normalizedEmail, normalizedUsername)
     if (existing) {
-      throw Object.assign(new Error('El correo o usuario ya está registrado'), { status: 400, expose: true })
+      throw Object.assign(new Error('El correo o usuario ya esta registrado'), { status: 400, expose: true })
     }
 
     const id = genId()
@@ -24,22 +36,28 @@ export class AuthService {
     const hash = await hashPassword(password)
 
     db.prepare('INSERT INTO users (id, name, username, email, password_hash, role, created_at) VALUES (?,?,?,?,?,?,?)')
-      .run(id, name, username, email, hash, 'student', now)
+      .run(id, normalizedName, normalizedUsername, normalizedEmail, hash, 'student', now)
 
     const token = genId()
     db.prepare('INSERT INTO sessions (token, user_id, created_at) VALUES (?,?,?)').run(token, id, now)
 
-    return { user: { id, name, username, email, role: 'student' }, token }
+    return {
+      user: { id, name: normalizedName, username: normalizedUsername, email: normalizedEmail, role: 'student' },
+      token
+    }
   }
 
   async login({ email, password }: { email: string; password: string }): Promise<AuthResult> {
-    const user = db.prepare('SELECT * FROM users WHERE email = ?').get(email) as any
+    const normalizedEmail = this.normalizeEmail(email)
+    const user = db.prepare('SELECT * FROM users WHERE email = ?').get(normalizedEmail) as any
     if (!user) {
+      console.warn(`[Auth] Login fallido: usuario no encontrado (${normalizedEmail})`)
       throw Object.assign(new Error('Correo o contraseña incorrectos'), { status: 401, expose: true })
     }
 
     const valid = await comparePassword(password, user.password_hash)
     if (!valid) {
+      console.warn(`[Auth] Login fallido: contraseña incorrecta (${normalizedEmail})`)
       throw Object.assign(new Error('Correo o contraseña incorrectos'), { status: 401, expose: true })
     }
 
@@ -62,7 +80,7 @@ export class AuthService {
     return { ok: true }
   }
 
-  getSupabaseConfig(): { configured: boolean; supabaseUrl: string | undefined; supabaseAnonKey: string | undefined } {
-    return { configured: isConfigured, supabaseUrl, supabaseAnonKey }
+  getSupabaseConfig(): { configured: boolean } {
+    return { configured: isConfigured }
   }
 }

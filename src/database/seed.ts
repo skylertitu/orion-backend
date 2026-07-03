@@ -6,8 +6,6 @@ export default async function seedData(): Promise<void> {
   initSchema()
 
   const existing = db.prepare('SELECT COUNT(*) as count FROM users').get() as { count: number }
-  if (existing.count > 0) return
-
   const now = new Date().toISOString()
   const teacherId = 'demo-teacher'
 
@@ -15,15 +13,24 @@ export default async function seedData(): Promise<void> {
   const teacherHash = await hashPassword('teacher123')
   const studentHash = await hashPassword('student123')
 
-  db.prepare('INSERT INTO users (id, name, username, email, password_hash, role, created_at) VALUES (?,?,?,?,?,?,?)').run(
-    'demo-admin', 'Director General', 'director', 'admin@tradingacademy.com', adminHash, 'admin', now
-  )
-  db.prepare('INSERT INTO users (id, name, username, email, password_hash, role, created_at) VALUES (?,?,?,?,?,?,?)').run(
-    teacherId, 'Prof. Carlos Trader', 'carlos', 'teacher@tradingacademy.com', teacherHash, 'teacher', now
-  )
-  db.prepare('INSERT INTO users (id, name, username, email, password_hash, role, created_at) VALUES (?,?,?,?,?,?,?)').run(
-    'demo-student', 'Ana Estudiante', 'ana', 'student@tradingacademy.com', studentHash, 'student', now
-  )
+  const ensureUser = (id: string, name: string, username: string, email: string, passwordHash: string, role: string) => {
+    const existingUser = db.prepare('SELECT id FROM users WHERE email = ? OR username = ?').get(email, username) as { id: string } | undefined
+    if (existingUser) {
+      db.prepare('UPDATE users SET name = ?, username = ?, email = ?, password_hash = ?, role = ? WHERE id = ?')
+        .run(name, username, email, passwordHash, role, existingUser.id)
+      return existingUser.id
+    }
+
+    db.prepare('INSERT INTO users (id, name, username, email, password_hash, role, created_at) VALUES (?,?,?,?,?,?,?)')
+      .run(id, name, username, email, passwordHash, role, now)
+    return id
+  }
+
+  ensureUser('demo-admin', 'Director General', 'director', 'admin@tradingacademy.com', adminHash, 'admin')
+  ensureUser(teacherId, 'Prof. Carlos Trader', 'carlos', 'teacher@tradingacademy.com', teacherHash, 'teacher')
+  ensureUser('demo-student', 'Ana Estudiante', 'ana', 'student@tradingacademy.com', studentHash, 'student')
+
+  if (existing.count > 0) return
 
   const lessons = [
     { title: 'Introducción al Análisis Técnico', content: 'Fundamentos del análisis técnico, incluyendo soportes, resistencias y tendencias de mercado.' },
