@@ -1,13 +1,18 @@
 import db from '../../database/db.js'
 import { genId } from '../../common/utils/id.js'
+import { mapKeys } from '../../common/utils/camelcase.js'
 
 export class SubmissionsService {
   getByTask(taskId: string): any[] {
-    return db.prepare(`
+    const rows = db.prepare(`
       SELECT s.*, u.name as student_name FROM submissions s
       LEFT JOIN users u ON u.id = s.student_id
       WHERE s.task_id = ?
-    `).all(taskId)
+    `).all(taskId) as any[]
+    return rows.map(r => ({
+      ...mapKeys(r),
+      profiles: { name: r.student_name }
+    }))
   }
 
   getByStudent(studentId: string): any[] {

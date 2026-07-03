@@ -1,5 +1,6 @@
 import db from '../../database/db.js'
 import { genId } from '../../common/utils/id.js'
+import { mapKeys } from '../../common/utils/camelcase.js'
 
 interface CourseInput { title: string; description?: string; image_url?: string }
 interface LessonInput { title: string; content?: string; video_url?: string }
@@ -7,10 +8,13 @@ interface MeetingInput { title: string; date?: string; time?: string; platform?:
 
 function populate(c: any): any {
   if (!c) return null
-  c.lessons = db.prepare('SELECT * FROM course_lessons WHERE course_id = ? ORDER BY order_index').all(c.id)
-  c.meetings = db.prepare('SELECT * FROM course_meetings WHERE course_id = ?').all(c.id)
+  c.lessons = mapKeys(db.prepare('SELECT * FROM course_lessons WHERE course_id = ? ORDER BY order_index').all(c.id))
+  c.meetings = mapKeys(db.prepare('SELECT * FROM course_meetings WHERE course_id = ?').all(c.id))
   c.students = db.prepare(`
-    SELECT e.*, u.name as student_name FROM enrollments e
+    SELECT e.student_id AS studentId, u.name AS studentName,
+           e.student_email AS studentEmail, e.blocked,
+           e.enrolled_at AS enrolledAt
+    FROM enrollments e
     LEFT JOIN users u ON u.id = e.student_id
     WHERE e.course_id = ?
   `).all(c.id)
@@ -54,14 +58,14 @@ export class CoursesService {
     const id = genId()
     db.prepare('INSERT INTO courses (id, teacher_id, title, description, image_url, created_at) VALUES (?,?,?,?,?,?)')
       .run(id, teacherId, title, description, image_url, new Date().toISOString())
-    return db.prepare('SELECT * FROM courses WHERE id = ?').get(id)
+    return mapKeys(db.prepare('SELECT * FROM courses WHERE id = ?').get(id))
   }
 
   update(courseId: string, teacherId: string, { title, description, image_url }: CourseInput): any {
     const result = db.prepare('UPDATE courses SET title = COALESCE(?, title), description = COALESCE(?, description), image_url = COALESCE(?, image_url) WHERE id = ? AND teacher_id = ?')
       .run(title || null, description || null, image_url || null, courseId, teacherId)
     if (result.changes === 0) throw Object.assign(new Error('Curso no encontrado'), { status: 404, expose: true })
-    return db.prepare('SELECT * FROM courses WHERE id = ?').get(courseId)
+    return mapKeys(db.prepare('SELECT * FROM courses WHERE id = ?').get(courseId))
   }
 
   delete(courseId: string, teacherId: string): { ok: boolean } {
@@ -79,14 +83,14 @@ export class CoursesService {
     const maxOrder = db.prepare('SELECT COALESCE(MAX(order_index), 0) + 1 as next FROM course_lessons WHERE course_id = ?').get(courseId) as { next: number }
     db.prepare('INSERT INTO course_lessons (id, course_id, title, content, video_url, order_index, created_at) VALUES (?,?,?,?,?,?,?)')
       .run(id, courseId, title, content, video_url, maxOrder.next, new Date().toISOString())
-    return db.prepare('SELECT * FROM course_lessons WHERE id = ?').get(id)
+    return mapKeys(db.prepare('SELECT * FROM course_lessons WHERE id = ?').get(id))
   }
 
   updateLesson(lessonId: string, { title, content, video_url }: LessonInput): any {
     const result = db.prepare('UPDATE course_lessons SET title = COALESCE(?, title), content = COALESCE(?, content), video_url = COALESCE(?, video_url) WHERE id = ?')
       .run(title || null, content || null, video_url || null, lessonId)
     if (result.changes === 0) throw Object.assign(new Error('Lección no encontrada'), { status: 404, expose: true })
-    return db.prepare('SELECT * FROM course_lessons WHERE id = ?').get(lessonId)
+    return mapKeys(db.prepare('SELECT * FROM course_lessons WHERE id = ?').get(lessonId))
   }
 
   removeLesson(lessonId: string): { ok: boolean } {
@@ -99,7 +103,7 @@ export class CoursesService {
     const id = genId()
     db.prepare('INSERT INTO course_meetings (id, course_id, title, date, time, platform, link, created_at) VALUES (?,?,?,?,?,?,?,?)')
       .run(id, courseId, title, date, time, platform, link, new Date().toISOString())
-    return db.prepare('SELECT * FROM course_meetings WHERE id = ?').get(id)
+    return mapKeys(db.prepare('SELECT * FROM course_meetings WHERE id = ?').get(id))
   }
 
   removeMeeting(meetingId: string): { ok: boolean } {

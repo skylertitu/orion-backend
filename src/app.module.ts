@@ -1,5 +1,5 @@
 import 'dotenv/config'
-import express, { type NextFunction, type Request, type Response } from 'express'
+import express, { type Express, type NextFunction, type Request, type Response } from 'express'
 import cors from 'cors'
 import helmet from 'helmet'
 import rateLimit from 'express-rate-limit'
@@ -36,7 +36,7 @@ function formatStatusLabel(statusCode: number): string {
   return 'LOG'
 }
 
-export function createApp() {
+export function createApp(): Express {
   const app = express()
 
   const CORS_ORIGIN = process.env.CORS_ORIGIN || '*'
