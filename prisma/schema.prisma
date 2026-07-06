@@ -1,0 +1,203 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model User {
+  id           String   @id @default(uuid())
+  name         String
+  username     String   @unique
+  email        String   @unique
+  passwordHash String   @map("password_hash")
+  role         String   @default("student")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  sessions        Session[]
+  lessons         Lesson[]
+  tasks           Task[]
+  meetings        Meeting[]
+  announcements   Announcement[]
+  submissions     Submission[]
+  teacherCourses  Course[]            @relation("TeacherCourses")
+  enrollments     Enrollment[]
+  progressRecords CourseProgress[]    @relation("StudentProgress")
+  notifications   Notification[]
+
+  @@map("users")
+}
+
+model Session {
+  token          String    @id
+  userId         String    @map("user_id")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  lastActivityAt DateTime? @map("last_activity_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("sessions")
+}
+
+model Lesson {
+  id        String   @id @default(uuid())
+  teacherId String   @map("teacher_id")
+  title     String
+  content   String?
+  date      String?
+  createdAt DateTime @default(now()) @map("created_at")
+
+  teacher User @relation(fields: [teacherId], references: [id])
+
+  @@map("lessons")
+}
+
+model Task {
+  id          String   @id @default(uuid())
+  teacherId   String   @map("teacher_id")
+  title       String
+  description String?
+  dueDate     String?  @map("due_date")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  teacher     User         @relation(fields: [teacherId], references: [id])
+  submissions Submission[]
+
+  @@map("tasks")
+}
+
+model Meeting {
+  id          String   @id @default(uuid())
+  teacherId   String   @map("teacher_id")
+  title       String
+  date        String?
+  time        String?
+  link        String?
+  isLiveClass Int      @default(0) @map("is_live_class")
+  platform    String?
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  teacher User @relation(fields: [teacherId], references: [id])
+
+  @@map("meetings")
+}
+
+model Announcement {
+  id        String   @id @default(uuid())
+  teacherId String   @map("teacher_id")
+  content   String
+  createdAt DateTime @default(now()) @map("created_at")
+
+  teacher User @relation(fields: [teacherId], references: [id])
+
+  @@map("announcements")
+}
+
+model Submission {
+  id          String   @id @default(uuid())
+  taskId      String   @map("task_id")
+  studentId   String   @map("student_id")
+  content     String?
+  submittedAt String?  @map("submitted_at")
+  grade       Float?
+
+  task    Task @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  student User @relation(fields: [studentId], references: [id])
+
+  @@map("submissions")
+}
+
+model Course {
+  id          String   @id @default(uuid())
+  teacherId   String   @map("teacher_id")
+  title       String
+  description String?
+  imageUrl    String?  @map("image_url")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  teacher      User              @relation(fields: [teacherId], references: [id], name: "TeacherCourses")
+  lessons      CourseLesson[]
+  meetings     CourseMeeting[]
+  enrollments  Enrollment[]
+  progress     CourseProgress[]
+  notifications Notification[]
+
+  @@map("courses")
+}
+
+model CourseLesson {
+  id         String   @id @default(uuid())
+  courseId   String   @map("course_id")
+  title      String
+  content    String?
+  videoUrl   String?  @map("video_url")
+  orderIndex Int      @default(0) @map("order_index")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  course     Course           @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  progress   CourseProgress[]
+
+  @@map("course_lessons")
+}
+
+model CourseMeeting {
+  id        String   @id @default(uuid())
+  courseId  String   @map("course_id")
+  title     String
+  date      String?
+  time      String?
+  platform  String?
+  link      String?
+  createdAt DateTime @default(now()) @map("created_at")
+
+  course Course @relation(fields: [courseId], references: [id], onDelete: Cascade)
+
+  @@map("course_meetings")
+}
+
+model Enrollment {
+  courseId     String   @map("course_id")
+  studentId    String   @map("student_id")
+  studentName  String?  @map("student_name")
+  studentEmail String?  @map("student_email")
+  blocked      Int      @default(0)
+  enrolledAt   DateTime @default(now()) @map("enrolled_at")
+
+  course  Course @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  student User   @relation(fields: [studentId], references: [id])
+
+  @@id([courseId, studentId])
+  @@map("enrollments")
+}
+
+model CourseProgress {
+  id          String    @id @default(uuid())
+  studentId   String    @map("student_id")
+  courseId    String    @map("course_id")
+  lessonId    String    @map("lesson_id")
+  completed   Int       @default(0)
+  completedAt DateTime? @map("completed_at")
+
+  student User         @relation(fields: [studentId], references: [id], name: "StudentProgress")
+  course  Course       @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  lesson  CourseLesson @relation(fields: [lessonId], references: [id], onDelete: Cascade)
+
+  @@map("course_progress")
+}
+
+model Notification {
+  id        String   @id @default(uuid())
+  userId    String   @map("user_id")
+  type      String   @default("info")
+  title     String?
+  message   String?
+  courseId  String?  @map("course_id")
+  read      Int      @default(0)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user   User    @relation(fields: [userId], references: [id])
+  course Course? @relation(fields: [courseId], references: [id])
+
+  @@map("notifications")
+}

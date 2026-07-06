@@ -1,6 +1,6 @@
 import db from '../../database/db.js'
-import { genId } from '../../common/utils/id.js'
-import { mapKeys } from '../../common/utils/camelcase.js'
+import { genId } from '../../lib/id.js'
+import { mapKeys } from '../../lib/camelcase.js'
 
 interface MeetingInput { title: string; date?: string; time?: string; link?: string; isLiveClass?: boolean; platform?: string }
 

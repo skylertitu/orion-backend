@@ -1,8 +1,8 @@
 import { Router } from 'express'
 import { AnnouncementsService } from './announcements.service.js'
 import { AnnouncementsController } from './announcements.controller.js'
-import { requireAuth } from '../../common/guards/auth.guard.js'
-import { requireTeacher } from '../../common/guards/roles.guard.js'
+import { requireAuth } from '../../shared/guards/auth.guard.js'
+import { requireTeacher } from '../../shared/guards/roles.guard.js'
 
 export function createAnnouncementsModule(): Router {
   const service = new AnnouncementsService()

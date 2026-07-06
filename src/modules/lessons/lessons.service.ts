@@ -1,5 +1,5 @@
 import db from '../../database/db.js'
-import { genId } from '../../common/utils/id.js'
+import { genId } from '../../lib/id.js'
 
 interface LessonInput { title: string; content?: string; date?: string }
 interface LessonRow { id: string; teacher_id: string; title: string; content?: string; date?: string; created_at: string }

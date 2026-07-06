@@ -3,8 +3,8 @@ import { existsSync, mkdirSync } from 'fs'
 
 type DB = InstanceType<typeof Database>
 
-const DB_DIR = './src/data'
-const DB_PATH = DB_DIR + '/apptrading.db'
+const DB_DIR = process.env.DB_DIR || './src/data'
+const DB_PATH = process.env.DB_PATH || DB_DIR + '/apptrading.db'
 
 if (!existsSync(DB_DIR)) mkdirSync(DB_DIR, { recursive: true })
 

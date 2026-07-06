@@ -1,6 +1,6 @@
 import { Response, NextFunction } from 'express'
 import { UsersService } from './users.service.js'
-import { AuthenticatedRequest } from '../../common/guards/auth.guard.js'
+import { AuthenticatedRequest } from '../../shared/guards/auth.guard.js'
 
 export class UsersController {
   constructor(private service: UsersService) {}

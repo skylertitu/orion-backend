@@ -6,8 +6,13 @@ export interface AppError extends Error {
 }
 
 export function errorHandler(err: AppError, req: Request, res: Response, _next: NextFunction): void {
-  console.error(`[ERROR] ${req.method} ${req.path}:`, err.message)
-  res.status(err.status || 500).json({
+  const status = err.status || 500
+  const timestamp = new Date().toLocaleString('es-ES')
+  console.error(`\n❌ [ERROR] ${timestamp} ${req.method} ${req.originalUrl}`)
+  console.error(`   Status: ${status} | Mensaje: ${err.message}`)
+  if (status >= 500) console.error(`   Stack: ${err.stack}`)
+  console.error('')
+  res.status(status).json({
     error: err.expose ? err.message : 'Error interno del servidor'
   })
 }

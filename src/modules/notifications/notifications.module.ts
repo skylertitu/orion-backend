@@ -1,7 +1,7 @@
 import { Router } from 'express'
 import { NotificationsService } from './notifications.service.js'
 import { NotificationsController } from './notifications.controller.js'
-import { requireAuth } from '../../common/guards/auth.guard.js'
+import { requireAuth } from '../../shared/guards/auth.guard.js'
 
 export function createNotificationsModule(): Router {
   const service = new NotificationsService()

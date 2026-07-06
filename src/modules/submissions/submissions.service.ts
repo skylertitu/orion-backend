@@ -1,6 +1,6 @@
 import db from '../../database/db.js'
-import { genId } from '../../common/utils/id.js'
-import { mapKeys } from '../../common/utils/camelcase.js'
+import { genId } from '../../lib/id.js'
+import { mapKeys } from '../../lib/camelcase.js'
 
 export class SubmissionsService {
   getByTask(taskId: string): any[] {

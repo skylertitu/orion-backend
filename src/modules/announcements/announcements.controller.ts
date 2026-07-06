@@ -1,6 +1,6 @@
 import { Response, NextFunction } from 'express'
 import { AnnouncementsService } from './announcements.service.js'
-import { AuthenticatedRequest } from '../../common/guards/auth.guard.js'
+import { AuthenticatedRequest } from '../../shared/guards/auth.guard.js'
 
 export class AnnouncementsController {
   constructor(private service: AnnouncementsService) {}

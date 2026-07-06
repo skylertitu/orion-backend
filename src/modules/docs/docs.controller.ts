@@ -1,11 +1,15 @@
-import { Request, Response } from 'express'
-import { DocsService } from './docs.service.js'
+import { Router } from 'express'
+import swaggerUi from 'swagger-ui-express'
+import { swaggerSpec } from './swagger.js'
 
-export class DocsController {
-  constructor(private service: DocsService) {}
-
-  getHTML = (req: Request, res: Response): void => {
-    res.setHeader('Content-Type', 'text/html; charset=utf-8')
-    res.send(this.service.getHTML())
-  }
+export function createDocsModule(): Router {
+  const router = Router()
+  router.use('/', swaggerUi.serve, swaggerUi.setup(swaggerSpec, {
+    customSiteTitle: 'Trading Academy API Docs',
+    customfavIcon: '',
+    swaggerOptions: {
+      persistAuthorization: true,
+    },
+  }))
+  return router
 }

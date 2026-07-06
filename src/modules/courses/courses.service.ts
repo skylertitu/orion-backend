@@ -1,6 +1,6 @@
 import db from '../../database/db.js'
-import { genId } from '../../common/utils/id.js'
-import { mapKeys } from '../../common/utils/camelcase.js'
+import { genId } from '../../lib/id.js'
+import { mapKeys } from '../../lib/camelcase.js'
 
 interface CourseInput { title: string; description?: string; image_url?: string }
 interface LessonInput { title: string; content?: string; video_url?: string }
@@ -118,6 +118,25 @@ export class CoursesService {
     if (existing) throw Object.assign(new Error('Ya estás inscrito en este curso'), { status: 400, expose: true })
     db.prepare('INSERT INTO enrollments (course_id, student_id, student_name, student_email, blocked, enrolled_at) VALUES (?,?,?,?,?,?)')
       .run(courseId, user.id, user.name, user.email, 0, new Date().toISOString())
+    return { ok: true }
+  }
+
+  ensureDemoData(teacherId: string, teacherName: string): { ok: boolean } {
+    const existing = db.prepare('SELECT id FROM courses WHERE teacher_id = ? LIMIT 1').get(teacherId)
+    if (existing) return { ok: true }
+
+    const c1 = this.create(teacherId, { title: 'Análisis Técnico Avanzado', description: 'Curso completo de análisis técnico para trading profesional. Aprende patrones, indicadores y estrategias.' })
+    this.addLesson(c1.id, { title: 'Introducción al Análisis Técnico', content: 'En esta lección aprenderemos los fundamentos del análisis técnico, incluyendo soportes, resistencias y tendencias.' })
+    this.addLesson(c1.id, { title: 'Indicadores Técnicos', content: 'Estudio detallado de los principales indicadores: RSI, MACD, Bollinger Bands y medias móviles.' })
+
+    const demoStudent = db.prepare("SELECT id, name, email FROM users WHERE id = 'demo-student'").get() as { id: string; name: string; email: string } | undefined
+    if (demoStudent) {
+      try { this.enroll(c1.id, demoStudent) } catch {}
+    }
+
+    const c2 = this.create(teacherId, { title: 'Gestión de Riesgo', description: 'Aprende a proteger tu capital con estrategias profesionales de gestión de riesgo.' })
+    this.addLesson(c2.id, { title: 'Principios de Gestión de Riesgo', content: 'Reglas fundamentales para proteger tu capital y maximizar ganancias.' })
+
     return { ok: true }
   }
 

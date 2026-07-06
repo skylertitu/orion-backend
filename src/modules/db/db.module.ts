@@ -1,8 +1,8 @@
 import { Router } from 'express'
 import { DbAdminService } from './db.service.js'
 import { DbAdminController } from './db.controller.js'
-import { requireAuth } from '../../common/guards/auth.guard.js'
-import { requireAdmin } from '../../common/guards/roles.guard.js'
+import { requireAuth } from '../../shared/guards/auth.guard.js'
+import { requireAdmin } from '../../shared/guards/roles.guard.js'
 
 export function createDbAdminModule(): Router {
   const service = new DbAdminService()

@@ -1,8 +1,8 @@
 import { Router } from 'express'
 import { MeetingsService } from './meetings.service.js'
 import { MeetingsController } from './meetings.controller.js'
-import { requireAuth } from '../../common/guards/auth.guard.js'
-import { requireTeacher } from '../../common/guards/roles.guard.js'
+import { requireAuth } from '../../shared/guards/auth.guard.js'
+import { requireTeacher } from '../../shared/guards/roles.guard.js'
 
 export function createMeetingsModule(): Router {
   const service = new MeetingsService()

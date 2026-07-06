@@ -1,5 +1,5 @@
 import db from '../../database/db.js'
-import { genId } from '../../common/utils/id.js'
+import { genId } from '../../lib/id.js'
 
 interface TaskInput { title: string; description?: string; due_date?: string }
 
@@ -35,6 +35,7 @@ export class TasksService {
   }
 
   delete(taskId: string, teacherId: string): { ok: boolean } {
+    db.prepare('DELETE FROM submissions WHERE task_id = ?').run(taskId)
     const result = db.prepare('DELETE FROM tasks WHERE id = ? AND teacher_id = ?').run(taskId, teacherId)
     if (result.changes === 0) throw Object.assign(new Error('Tarea no encontrada'), { status: 404, expose: true })
     return { ok: true }

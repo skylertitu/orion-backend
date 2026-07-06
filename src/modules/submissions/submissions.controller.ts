@@ -1,6 +1,6 @@
 import { Response, NextFunction } from 'express'
 import { SubmissionsService } from './submissions.service.js'
-import { AuthenticatedRequest } from '../../common/guards/auth.guard.js'
+import { AuthenticatedRequest } from '../../shared/guards/auth.guard.js'
 
 export class SubmissionsController {
   constructor(private service: SubmissionsService) {}

@@ -1,8 +1,8 @@
 import { Router } from 'express'
 import { SubmissionsService } from './submissions.service.js'
 import { SubmissionsController } from './submissions.controller.js'
-import { requireAuth } from '../../common/guards/auth.guard.js'
-import { requireTeacher } from '../../common/guards/roles.guard.js'
+import { requireAuth } from '../../shared/guards/auth.guard.js'
+import { requireTeacher } from '../../shared/guards/roles.guard.js'
 
 export function createSubmissionsModule(): Router {
   const service = new SubmissionsService()

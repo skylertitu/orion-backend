@@ -1,8 +1,8 @@
 import { Router } from 'express'
 import { TasksService } from './tasks.service.js'
 import { TasksController } from './tasks.controller.js'
-import { requireAuth } from '../../common/guards/auth.guard.js'
-import { requireTeacher } from '../../common/guards/roles.guard.js'
+import { requireAuth } from '../../shared/guards/auth.guard.js'
+import { requireTeacher } from '../../shared/guards/roles.guard.js'
 
 export function createTasksModule(): Router {
   const service = new TasksService()

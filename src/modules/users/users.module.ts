@@ -1,7 +1,7 @@
 import { Router } from 'express'
 import { UsersService } from './users.service.js'
 import { UsersController } from './users.controller.js'
-import { requireAuth } from '../../common/guards/auth.guard.js'
+import { requireAuth } from '../../shared/guards/auth.guard.js'
 
 export function createUsersModule(): Router {
   const service = new UsersService()

@@ -1,6 +1,6 @@
 import { Response, NextFunction } from 'express'
 import { CoursesService } from './courses.service.js'
-import { AuthenticatedRequest } from '../../common/guards/auth.guard.js'
+import { AuthenticatedRequest } from '../../shared/guards/auth.guard.js'
 
 export class CoursesController {
   constructor(private service: CoursesService) {}
@@ -44,6 +44,10 @@ export class CoursesController {
   enroll = (req: AuthenticatedRequest, res: Response, next: NextFunction): void => {
     try { res.json(this.service.enroll(req.params.courseId as string, req.user!)) } catch (err) { next(err) }
   }
+  ensureDemoData = (req: AuthenticatedRequest, res: Response, next: NextFunction): void => {
+    try { res.json(this.service.ensureDemoData(req.user!.id, req.user!.name)) } catch (err) { next(err) }
+  }
+
   toggleBlock = (req: AuthenticatedRequest, res: Response, next: NextFunction): void => {
     try { res.json(this.service.toggleBlock(req.params.courseId as string, req.params.studentId as string)) } catch (err) { next(err) }
   }

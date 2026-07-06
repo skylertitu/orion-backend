@@ -1,6 +1,6 @@
 import { Response, NextFunction } from 'express'
 import { DbAdminService } from './db.service.js'
-import { AuthenticatedRequest } from '../../common/guards/auth.guard.js'
+import { AuthenticatedRequest } from '../../shared/guards/auth.guard.js'
 
 export class DbAdminController {
   constructor(private service: DbAdminService) {}

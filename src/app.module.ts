@@ -4,6 +4,7 @@ import cors from 'cors'
 import helmet from 'helmet'
 import rateLimit from 'express-rate-limit'
 
+
 import { createAuthModule } from './modules/auth/auth.module.js'
 import { createUsersModule } from './modules/users/users.module.js'
 import { createLessonsModule } from './modules/lessons/lessons.module.js'
@@ -16,9 +17,11 @@ import { createProgressModule } from './modules/progress/progress.module.js'
 import { createNotificationsModule } from './modules/notifications/notifications.module.js'
 import { createDbAdminModule } from './modules/db/db.module.js'
 import { createDocsModule } from './modules/docs/docs.module.js'
+import { createHealthModule } from './modules/health/health.module.js'
 
-import { errorHandler } from './common/filters/http-exception.filter.js'
-import { logModuleRoutes } from './common/utils/log-routes.js'
+import { AppController } from './app.controller.js'
+import { AppService } from './app.service.js'
+import { errorHandler } from './shared/filters/http-exception.filter.js'
 
 function formatTimestamp(date: Date): string {
   const day = String(date.getDate()).padStart(2, '0')
@@ -40,6 +43,8 @@ export function createApp(): Express {
   const app = express()
 
   const CORS_ORIGIN = process.env.CORS_ORIGIN || '*'
+  const PORT = Number.parseInt(process.env.PORT as string, 10) || 3008
+
 
   app.use(helmet({ contentSecurityPolicy: false }))
   app.use(cors({ origin: CORS_ORIGIN, credentials: true }))
@@ -48,11 +53,37 @@ export function createApp(): Express {
   app.use((req: Request, res: Response, next: NextFunction) => {
     const startedAt = Date.now()
 
+    const originalJson = res.json.bind(res)
+    let responseBody: unknown = null
+    res.json = function (body: unknown) {
+      responseBody = body
+      return originalJson(body)
+    }
+
     res.on('finish', () => {
       const durationMs = Date.now() - startedAt
       const timestamp = formatTimestamp(new Date())
       const statusLabel = formatStatusLabel(res.statusCode)
-      console.log(`[Nest] ${process.pid} - ${timestamp} ${statusLabel} ${req.method} ${req.originalUrl} ${res.statusCode} +${durationMs}ms`)
+
+      if (res.statusCode >= 400) {
+        let detail = ''
+        if (responseBody) {
+          const safe = typeof responseBody === 'object' ? { ...responseBody as Record<string, unknown> } : responseBody
+          if (typeof safe === 'object' && safe !== null) delete (safe as any).stack
+          detail = ` | ${JSON.stringify(safe)}`
+        }
+        if (['POST', 'PUT', 'PATCH'].includes(req.method) && req.body && typeof req.body === 'object') {
+          const sanitized = { ...req.body }
+          if (sanitized.password) sanitized.password = '***'
+          if (sanitized.password_hash) sanitized.password_hash = '***'
+          detail += ` | Body: ${JSON.stringify(sanitized)}`
+        }
+        console.error(`\n❌ [ERROR] ${timestamp} ${req.method} ${req.originalUrl}`)
+        console.error(`   Status: ${res.statusCode} | Duration: ${durationMs}ms${detail}`)
+        console.error('')
+      } else {
+        console.log(`[Nest] ${process.pid} - ${timestamp} ${statusLabel} ${req.method} ${req.originalUrl} ${res.statusCode} +${durationMs}ms`)
+      }
     })
 
     next()
@@ -78,22 +109,23 @@ export function createApp(): Express {
   app.use('/api/auth/login', authLimiter)
   app.use('/api/auth/register', authLimiter)
 
-  app.get('/api/health', (req: Request, res: Response) => {
-    res.json({ status: 'ok', timestamp: new Date().toISOString() })
-  })
+  const appService = new AppService()
+  const appController = new AppController(appService)
+  app.get('/api', (req, res) => appController.root(req, res))
 
-  const authRouter = createAuthModule(); app.use('/api/auth', authRouter); logModuleRoutes(authRouter, '/api/auth')
-  const usersRouter = createUsersModule(); app.use('/api/users', usersRouter); logModuleRoutes(usersRouter, '/api/users')
-  const lessonsRouter = createLessonsModule(); app.use('/api/lessons', lessonsRouter); logModuleRoutes(lessonsRouter, '/api/lessons')
-  const tasksRouter = createTasksModule(); app.use('/api/tasks', tasksRouter); logModuleRoutes(tasksRouter, '/api/tasks')
-  const meetingsRouter = createMeetingsModule(); app.use('/api/meetings', meetingsRouter); logModuleRoutes(meetingsRouter, '/api/meetings')
-  const announcementsRouter = createAnnouncementsModule(); app.use('/api/announcements', announcementsRouter); logModuleRoutes(announcementsRouter, '/api/announcements')
-  const submissionsRouter = createSubmissionsModule(); app.use('/api/submissions', submissionsRouter); logModuleRoutes(submissionsRouter, '/api/submissions')
-  const coursesRouter = createCoursesModule(); app.use('/api/courses', coursesRouter); logModuleRoutes(coursesRouter, '/api/courses')
-  const progressRouter = createProgressModule(); app.use('/api/progress', progressRouter); logModuleRoutes(progressRouter, '/api/progress')
-  const notificationsRouter = createNotificationsModule(); app.use('/api/notifications', notificationsRouter); logModuleRoutes(notificationsRouter, '/api/notifications')
-  const dbAdminRouter = createDbAdminModule(); app.use('/api/db', dbAdminRouter); logModuleRoutes(dbAdminRouter, '/api/db')
-  const docsRouter = createDocsModule(); app.use('/api/docs', docsRouter); logModuleRoutes(docsRouter, '/api/docs')
+  const healthRouter = createHealthModule(); app.use('/api/health', healthRouter)
+  const authRouter = createAuthModule(); app.use('/api/auth', authRouter)
+  const usersRouter = createUsersModule(); app.use('/api/users', usersRouter)
+  const lessonsRouter = createLessonsModule(); app.use('/api/lessons', lessonsRouter)
+  const tasksRouter = createTasksModule(); app.use('/api/tasks', tasksRouter)
+  const meetingsRouter = createMeetingsModule(); app.use('/api/meetings', meetingsRouter)
+  const announcementsRouter = createAnnouncementsModule(); app.use('/api/announcements', announcementsRouter)
+  const submissionsRouter = createSubmissionsModule(); app.use('/api/submissions', submissionsRouter)
+  const coursesRouter = createCoursesModule(); app.use('/api/courses', coursesRouter)
+  const progressRouter = createProgressModule(); app.use('/api/progress', progressRouter)
+  const notificationsRouter = createNotificationsModule(); app.use('/api/notifications', notificationsRouter)
+  const dbAdminRouter = createDbAdminModule(); app.use('/api/db', dbAdminRouter)
+  const docsRouter = createDocsModule(); app.use('/api/docs', docsRouter)
 
   app.use((req: Request, res: Response) => {
     res.status(404).json({ error: 'Ruta no encontrada' })

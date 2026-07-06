@@ -1,7 +1,6 @@
 import db from '../../database/db.js'
-import { genId } from '../../common/utils/id.js'
-import { hashPassword, comparePassword } from '../../common/utils/password.js'
-import { isConfigured } from '../../common/config/supabase.js'
+import { genId } from '../../lib/id.js'
+import { hashPassword, comparePassword } from '../../lib/password.js'
 
 export interface AuthUser {
   id: string
@@ -78,9 +77,5 @@ export class AuthService {
   logout(token: string): { ok: boolean } {
     db.prepare('DELETE FROM sessions WHERE token = ?').run(token)
     return { ok: true }
-  }
-
-  getSupabaseConfig(): { configured: boolean } {
-    return { configured: isConfigured }
   }
 }

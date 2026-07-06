@@ -1,5 +1,5 @@
 import db from '../../database/db.js'
-import { genId } from '../../common/utils/id.js'
+import { genId } from '../../lib/id.js'
 
 export class ProgressService {
   upsert(studentId: string, courseId: string, lessonId: string, { completed }: { completed?: boolean }): any[] {

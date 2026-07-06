@@ -1,6 +1,6 @@
 import { Response, NextFunction } from 'express'
 import { AuthService } from './auth.service.js'
-import { AuthenticatedRequest } from '../../common/guards/auth.guard.js'
+import { AuthenticatedRequest } from '../../shared/guards/auth.guard.js'
 
 export class AuthController {
   constructor(private service: AuthService) {}
@@ -25,10 +25,5 @@ export class AuthController {
 
   logout = (req: AuthenticatedRequest, res: Response): void => {
     res.json(this.service.logout(req.token!))
-  }
-
-  getSupabaseConfig = (req: AuthenticatedRequest, res: Response, next: NextFunction): void => {
-    try { res.json(this.service.getSupabaseConfig()) }
-    catch (err) { next(err) }
   }
 }
