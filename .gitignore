@@ -1,5 +1,32 @@
+# Dependencias
 node_modules/
-src/data/
-.env
-test/tmp-db/
+
+# Build compilado
 dist/
+
+# Variables de entorno
+.env
+.env.local
+.env.*.local
+
+# Firebase Admin (nunca subir la clave)
+*serviceAccount*.json
+firebase-adminsdk*.json
+secrets/
+
+# Logs de runtime
+logs/
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# Scripts temporales de testing
+scripts/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
