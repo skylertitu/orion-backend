@@ -1,16 +1,8 @@
 allowBuilds:
-  '@prisma/engines': true
+  '@firebase/util': true
   '@scarf/scarf': true
-  better-sqlite3: true
-  esbuild: true
-  prisma: true
-minimumReleaseAgeExclude:
-  - tsx@4.23.0
-  - '@vitest/expect@4.1.10'
-  - '@vitest/mocker@4.1.10'
-  - '@vitest/pretty-format@4.1.10'
-  - '@vitest/runner@4.1.10'
-  - '@vitest/snapshot@4.1.10'
-  - '@vitest/spy@4.1.10'
-  - '@vitest/utils@4.1.10'
-  - vitest@4.1.10
+  bcrypt: true
+  esbuild: false
+  protobufjs: true
+  unrs-resolver: false
+  zeromq: true
