@@ -9,6 +9,22 @@ import Strategy from '../models/Strategy';
 import Signal from '../models/Signal';
 import Trade from '../models/Trade';
 import { workerLogger, tradeLogger } from '../utils/logger';
+import { assertCanOpen, isPausedByRiskSync, recordBrokerResult } from '../services/risk.service';
+
+function errorText(err: unknown): string {
+  if (err instanceof Error) {
+    const extra = err as { parent?: { message?: string }; original?: { message?: string } };
+    const nested = extra.parent?.message || extra.original?.message;
+    const parts = [err.name !== 'Error' ? err.name : '', err.message, nested].filter(Boolean);
+    return [...new Set(parts)].join(': ') || err.stack || 'Error sin mensaje';
+  }
+  if (typeof err === 'string' && err.trim()) return err;
+  try {
+    return JSON.stringify(err);
+  } catch {
+    return String(err);
+  }
+}
 
 interface StrategyState {
   strategyId: number;
@@ -62,6 +78,10 @@ export class TradingWorker {
 
   start(): void {
     if (this.running) { workerLogger.warn('Ya está corriendo.'); return; }
+    if (isPausedByRiskSync()) {
+      workerLogger.warn('No arranca: pausado por motor de riesgo.');
+      return;
+    }
     this.running = true;
     this.startTime = Date.now();
     workerLogger.info(`Iniciado. Ciclo cada ${this.cycleMs / 1000}s`);
@@ -114,8 +134,8 @@ export class TradingWorker {
       if (openTrades.length) {
         workerLogger.info(`Restauradas ${openTrades.length} posiciones abiertas desde trades`);
       }
-    } catch (err: any) {
-      workerLogger.error(`No se pudieron restaurar trades: ${err.message}`);
+    } catch (err: unknown) {
+      workerLogger.error(`No se pudieron restaurar trades: ${errorText(err)}`);
     }
   }
 
@@ -134,7 +154,10 @@ export class TradingWorker {
       activeStrategies: this.states.size,
       openPositions: [...this.states.values()].filter((s) => s.inPosition).length,
       wsConnected: binanceWs.isConnected(),
-      errors: this.errors.slice(-20),
+      errors: this.errors.filter((row) => {
+        const text = String(row).trim();
+        return text.length > 0 && !/^Cycle:\s*(undefined|null)?\s*$/i.test(text);
+      }).slice(-20),
       strategyStates: [...this.states.entries()].map(([id, s]) => ({
         strategyId: id,
         name: '',
@@ -181,17 +204,21 @@ export class TradingWorker {
       for (const strategy of strategies) {
         try {
           await this.processStrategy(strategy);
-        } catch (err: any) {
-          workerLogger.error(`Error en estrategia ${strategy.id} (${strategy.name}): ${err.message}`);
-          this.errors.push(`Strategy ${strategy.id}: ${err.message}`);
+        } catch (err: unknown) {
+          const text = errorText(err);
+          workerLogger.error(`Error en estrategia ${strategy.id} (${strategy.name}): ${text}`);
+          this.errors.push(`Strategy ${strategy.id}: ${text}`);
           if (this.errors.length > 100) this.errors = this.errors.slice(-50);
         }
       }
 
       await this.cleanupClosedStates(strategies.map((s) => s.id));
-    } catch (err: any) {
-      workerLogger.error(`Error general en ciclo: ${err.message}`);
-      this.errors.push(`Cycle: ${err.message}`);
+    } catch (err: unknown) {
+      const text = errorText(err);
+      workerLogger.error(`Error general en ciclo: ${text}`);
+      if (text && text !== 'Error sin mensaje') {
+        this.errors.push(`Cycle: ${text}`);
+      }
     }
   }
 
@@ -376,6 +403,19 @@ export class TradingWorker {
     const state = this.states.get(strategy.id);
     if (state?.inPosition) return;
 
+    const notional = (config.quantity || 0) * price;
+    const allowed = await assertCanOpen({
+      notionalUsd: notional,
+      symbol: config.symbol,
+      strategyId: strategy.id,
+    });
+    if (!allowed.ok) {
+      workerLogger.warn(`Risk block #${strategy.id}: ${allowed.reason}`);
+      this.errors.push(`Risk: ${allowed.reason}`);
+      if (this.errors.length > 100) this.errors = this.errors.slice(-50);
+      return;
+    }
+
     const order: UnifiedOrder = {
       broker: config.broker as BrokerId,
       symbol: config.symbol,
@@ -386,8 +426,11 @@ export class TradingWorker {
     };
 
     const result = await tradingEngine.execute(order);
+    await recordBrokerResult(result.success, result.error);
     if (!result.success) {
       workerLogger.error(`Error abriendo: ${result.error}`);
+      this.errors.push(`Open ${config.symbol}: ${result.error}`);
+      if (this.errors.length > 100) this.errors = this.errors.slice(-50);
       return;
     }
 
@@ -456,6 +499,18 @@ export class TradingWorker {
     const qty2 = this.roundQty((qty1 * signal.price1) / signal.price2);
     if (!qty1 || !qty2) {
       workerLogger.error(`Spread ${strategy.id}: cantidad inválida qty1=${qty1} qty2=${qty2}`);
+      return;
+    }
+
+    const allowed = await assertCanOpen({
+      notionalUsd: qty1 * signal.price1 + qty2 * signal.price2,
+      symbol: `${config.symbol}/${config.pairSymbol}`,
+      strategyId: strategy.id,
+    });
+    if (!allowed.ok) {
+      workerLogger.warn(`Risk block spread #${strategy.id}: ${allowed.reason}`);
+      this.errors.push(`Risk: ${allowed.reason}`);
+      if (this.errors.length > 100) this.errors = this.errors.slice(-50);
       return;
     }
 
@@ -531,7 +586,7 @@ export class TradingWorker {
     side: 'buy' | 'sell',
     quantity: number
   ) {
-    return tradingEngine.execute({
+    const result = await tradingEngine.execute({
       broker: config.broker as BrokerId,
       symbol,
       side,
@@ -539,6 +594,8 @@ export class TradingWorker {
       userId: strategy.userId,
       brokerAccountId: config.brokerAccountId,
     });
+    await recordBrokerResult(result.success, result.error);
+    return result;
   }
 
   private async persistOpenTrade(
@@ -705,6 +762,7 @@ export class TradingWorker {
         brokerAccountId: config.brokerAccountId,
       });
     }
+    await recordBrokerResult(Boolean(result?.success), result?.error);
     return result;
   }
 

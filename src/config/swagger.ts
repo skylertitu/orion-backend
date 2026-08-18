@@ -564,6 +564,59 @@ const options: swaggerJsdoc.Options = {
           },
         },
       },
+      '/api/admin/risk': {
+        get: {
+          tags: ['System'],
+          summary: 'Límites y estado del motor de riesgo',
+          security: [{ bearerAuth: [] }],
+          responses: { '200': { description: 'Snapshot de riesgo' } },
+        },
+        patch: {
+          tags: ['System'],
+          summary: 'Guardar límites del worker (pérdida diaria, tope de orden, posiciones, racha)',
+          security: [{ bearerAuth: [] }],
+          requestBody: {
+            required: true,
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    maxDailyLossUsd: { type: 'number', example: 100 },
+                    maxOrderUsd: { type: 'number', example: 50 },
+                    maxOpenPositions: { type: 'integer', example: 3 },
+                    maxErrorStreak: { type: 'integer', example: 5 },
+                  },
+                },
+              },
+            },
+          },
+          responses: { '200': { description: 'Límites guardados' } },
+        },
+      },
+      '/api/admin/risk/pause': {
+        post: {
+          tags: ['System'],
+          summary: 'Pausar el worker por riesgo (sigue distinto de apagar el módulo)',
+          security: [{ bearerAuth: [] }],
+          requestBody: {
+            content: {
+              'application/json': {
+                schema: { type: 'object', properties: { reason: { type: 'string' } } },
+              },
+            },
+          },
+          responses: { '200': { description: 'Worker pausado' } },
+        },
+      },
+      '/api/admin/risk/resume': {
+        post: {
+          tags: ['System'],
+          summary: 'Reanudar el worker tras una pausa de riesgo',
+          security: [{ bearerAuth: [] }],
+          responses: { '200': { description: 'Worker reanudado' } },
+        },
+      },
       '/api/jupiter/status': {
         get: {
           tags: ['System'],

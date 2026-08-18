@@ -12,6 +12,7 @@ import {
 } from '../controllers/admin.controller';
 import { getSystemOverview, toggleSystemModule } from '../controllers/system.controller';
 import { saveJupiterKey, jupiterStatus } from '../controllers/jupiter.controller';
+import { getRisk, saveRisk, pauseRisk, resumeRisk } from '../controllers/risk.controller';
 
 const router = Router();
 
@@ -21,6 +22,10 @@ router.use(authMiddleware, adminMiddleware);
 router.get('/stats', getAdminStats);
 router.get('/system', getSystemOverview);
 router.patch('/system/:id', toggleSystemModule);
+router.get('/risk', getRisk);
+router.patch('/risk', saveRisk);
+router.post('/risk/pause', pauseRisk);
+router.post('/risk/resume', resumeRisk);
 router.get('/integrations/jupiter', jupiterStatus);
 router.patch('/integrations/jupiter', saveJupiterKey);
 

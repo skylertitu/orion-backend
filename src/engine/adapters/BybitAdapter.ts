@@ -35,30 +35,25 @@ export class BybitAdapter implements IBrokerAdapter {
   }
 
   async isConnected(): Promise<boolean> {
-    try {
-      await this.getPrice('BTCUSDT');
-      if (!this.apiKey || !this.apiSecret) return true;
-      const data = await this.privateGet('/v5/account/wallet-balance', {
-        accountType: 'UNIFIED',
-      });
-      return data.retCode === 0;
-    } catch {
-      return false;
+    await this.getPrice('BTCUSDT');
+    if (!this.apiKey || !this.apiSecret) return true;
+    const data = await this.privateGet('/v5/account/wallet-balance', {
+      accountType: 'UNIFIED',
+    });
+    if (data.retCode !== 0) {
+      throw new Error(data.retMsg || 'Bybit rechazó las credenciales');
     }
+    return true;
   }
 
   async getPrice(symbol: string): Promise<number> {
     const normalized = symbol.toUpperCase();
-    const res = await fetch(
-      `${this.baseUrl}/v5/market/tickers?category=${this.category}&symbol=${normalized}`
+    const data = await this.publicGet(
+      `/v5/market/tickers?category=${this.category}&symbol=${normalized}`
     );
-    if (!res.ok) {
-      throw new Error(`Par no disponible en Bybit: ${normalized}`);
+    if (data.retCode !== 0) {
+      throw new Error(data.retMsg || `Bybit rechazó ${normalized}`);
     }
-    const data = (await res.json()) as {
-      retCode: number;
-      result?: { list?: Array<{ lastPrice?: string }> };
-    };
     const price = parseFloat(data.result?.list?.[0]?.lastPrice || '0');
     if (!price) {
       throw new Error(`Precio no disponible para ${normalized}`);
@@ -282,6 +277,48 @@ export class BybitAdapter implements IBrokerAdapter {
         ticket,
         error: err.message || 'Error al cerrar posición en Bybit',
       };
+    }
+  }
+
+  private bybitHttpError(status: number, body: string): Error {
+    const text = body.replace(/\s+/g, ' ').trim();
+    if (status === 403 && /block access from your country/i.test(text)) {
+      return new Error(
+        'Bybit bloquea este país (CloudFront 403). api.bybit.com no acepta este servidor; Binance sí.'
+      );
+    }
+    if (status === 403) {
+      return new Error(`Bybit respondió 403: ${text.slice(0, 180) || 'acceso prohibido'}`);
+    }
+    return new Error(`Bybit HTTP ${status}${text ? `: ${text.slice(0, 180)}` : ''}`);
+  }
+
+  private async publicGet(path: string): Promise<{
+    retCode: number;
+    retMsg?: string;
+    result?: { list?: Array<{ lastPrice?: string }> };
+  }> {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 8000);
+    try {
+      const res = await fetch(`${this.baseUrl}${path}`, {
+        headers: { Accept: 'application/json' },
+        signal: controller.signal,
+      });
+      const body = await res.text();
+      if (!res.ok) throw this.bybitHttpError(res.status, body);
+      return JSON.parse(body) as {
+        retCode: number;
+        retMsg?: string;
+        result?: { list?: Array<{ lastPrice?: string }> };
+      };
+    } catch (err) {
+      if (err instanceof Error && err.name === 'AbortError') {
+        throw new Error('Bybit no respondió a tiempo (8s)');
+      }
+      throw err;
+    } finally {
+      clearTimeout(timer);
     }
   }
 

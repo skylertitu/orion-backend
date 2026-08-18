@@ -1,5 +1,6 @@
 import { BrokerId } from './engine.types';
 import { BrokerAccountType, BrokerEnvironment } from '../types';
+import { ExecutionMode } from './executionMode';
 
 export interface DecryptedCredentials {
   apiKey: string;
@@ -16,6 +17,7 @@ export interface ResolvedBrokerAccount {
   accountName: string;
   accountType: BrokerAccountType;
   environment: BrokerEnvironment;
+  executionMode: ExecutionMode;
   externalRef: string | null;
   status: string;
   meta: Record<string, unknown>;

@@ -10,6 +10,7 @@ import {
 } from '../types';
 import { magicForAccount } from '../engine/mtIdentity';
 import { encryptSecret } from '../utils/crypto';
+import { executionModeOf, withExecutionMode, ExecutionMode } from '../engine/executionMode';
 
 const SUPPORTED_BROKERS: BrokerId[] = ['binance', 'mt5', 'bybit'];
 const UNSUPPORTED_BROKERS = new Set(['okx', 'oanda']);
@@ -27,6 +28,7 @@ function toPublicView(account: BrokerAccount): BrokerAccountPublicView {
     accountName: account.accountName,
     accountType: account.accountType,
     environment: account.environment,
+    executionMode: executionModeOf(account.meta, account.environment),
     externalRef: account.externalRef,
     status: account.status,
     isPrimary: account.isPrimary,
@@ -110,7 +112,7 @@ export class BrokerAccountService {
       externalRef: input.externalRef || null,
       status: 'pending',
       isPrimary: Boolean(input.isPrimary),
-      meta: input.meta || {},
+      meta: withExecutionMode(input.meta || {}, executionModeOf(input.meta, input.environment)),
       ...applyCredentials(input.credentials),
     });
 
@@ -157,6 +159,19 @@ export class BrokerAccountService {
     return toPublicView(account);
   }
 
+  async setExecutionMode(
+    userId: number,
+    accountId: number,
+    mode: ExecutionMode
+  ): Promise<BrokerAccountPublicView> {
+    if (mode !== 'demo' && mode !== 'live') {
+      throw new Error('El modo debe ser demo o live');
+    }
+    const account = await this.findOwnedAccount(userId, accountId);
+    await account.update({ meta: withExecutionMode(account.meta, mode) });
+    return toPublicView(account);
+  }
+
   async testConnection(userId: number, accountId: number) {
     const account = await this.findOwnedAccount(userId, accountId);
 
@@ -189,7 +204,11 @@ export class BrokerAccountService {
         } else if (resolved.brokerId === 'bybit' && !hasCreds) {
           message = 'API pública OK. Agrega credenciales Bybit para operar en real.';
         } else {
-          message = 'Conexión verificada.';
+          const mode = executionModeOf(account.meta, account.environment);
+          message =
+            mode === 'demo'
+              ? 'Conexión verificada. Opera en DEMO: las órdenes no salen al exchange.'
+              : 'Conexión verificada. Esta cuenta envía órdenes reales.';
         }
       } else {
         message = 'No se pudo verificar la conexión.';

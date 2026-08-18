@@ -3,9 +3,10 @@
 // ============================================================
 import { accountResolver } from './AccountResolver';
 import { IBrokerAdapter } from './IBrokerAdapter';
-import { BrokerId, BrokerPosition, BrokerStatus, OrderResult, UnifiedOrder } from './engine.types';
-import { BrokerAccount } from '../models';
+import { BrokerId, BrokerPosition, BrokerStatus, OrderResult, OrderSide, UnifiedOrder } from './engine.types';
+import { BrokerAccount, Trade } from '../models';
 import { engineLogger } from '../utils/logger';
+import { ExecutionMode } from './executionMode';
 
 class TradingEngine {
   private adapters = new Map<BrokerId, IBrokerAdapter>();
@@ -28,6 +29,8 @@ class TradingEngine {
   private async resolveAdapter(order: UnifiedOrder): Promise<{
     adapter: IBrokerAdapter;
     brokerAccountId?: number;
+    executionMode: ExecutionMode;
+    userId?: number;
   }> {
     if (order.userId) {
       const { resolved, adapter } = await accountResolver.resolveAdapter({
@@ -36,16 +39,118 @@ class TradingEngine {
         brokerId: order.broker,
         requireActive: true,
       });
-      return { adapter, brokerAccountId: resolved.accountId };
+      return {
+        adapter,
+        brokerAccountId: resolved.accountId,
+        executionMode: resolved.executionMode,
+        userId: resolved.userId,
+      };
     }
 
-    return { adapter: this.getAdapter(order.broker) };
+    return { adapter: this.getAdapter(order.broker), executionMode: 'live' };
+  }
+
+  private async paperFill(order: UnifiedOrder, adapter: IBrokerAdapter, brokerAccountId?: number): Promise<OrderResult> {
+    const symbol = order.symbol.toUpperCase();
+    const price = await adapter.getPrice(symbol).catch(() => 0);
+    return {
+      success: true,
+      broker: order.broker,
+      ticket: `SIMULATED-${Date.now()}`,
+      symbol,
+      side: order.side,
+      quantity: order.quantity,
+      lot: order.lot,
+      executedPrice: price,
+      brokerAccountId,
+      raw: {
+        mode: 'demo',
+        message: 'Orden DEMO. No se envió al exchange. Pasa la cuenta a LIVE cuando quieras operar real.',
+      },
+    };
+  }
+
+  private async listPaperPositions(
+    userId: number,
+    adapter: IBrokerAdapter,
+    brokerId: BrokerId,
+    brokerAccountId: number
+  ): Promise<BrokerPosition[]> {
+    const trades = await Trade.findAll({
+      where: { userId, brokerAccountId, status: 'open' },
+      order: [['openedAt', 'DESC']],
+    });
+    const positions: BrokerPosition[] = [];
+    for (const trade of trades) {
+      const entry = Number(trade.entryPrice);
+      const qty = Number(trade.quantity) || Number(trade.lot) || 0;
+      const current = await adapter.getPrice(trade.symbol).catch(() => entry);
+      const delta = trade.side === 'sell' ? entry - current : current - entry;
+      positions.push({
+        broker: brokerId,
+        ticket: trade.ticket || trade.id,
+        symbol: trade.symbol,
+        side: trade.side,
+        quantity: trade.quantity != null ? Number(trade.quantity) : undefined,
+        lot: trade.lot != null ? Number(trade.lot) : undefined,
+        openPrice: entry,
+        currentPrice: current,
+        profit: delta * qty,
+        comment: 'DEMO',
+        brokerAccountId,
+      });
+    }
+    return positions;
+  }
+
+  private async closePaperTrade(
+    userId: number,
+    ticket: string | number,
+    adapter: IBrokerAdapter,
+    brokerId: BrokerId,
+    brokerAccountId?: number
+  ): Promise<OrderResult> {
+    const trade = await Trade.findOne({
+      where: {
+        userId,
+        ticket: String(ticket),
+        status: 'open',
+        ...(brokerAccountId ? { brokerAccountId } : {}),
+      },
+    });
+    const symbol = trade?.symbol || '';
+    const side = (trade?.side || 'sell') as OrderSide;
+    const exitPrice = symbol ? await adapter.getPrice(symbol).catch(() => Number(trade?.entryPrice || 0)) : 0;
+    if (trade) {
+      const entry = Number(trade.entryPrice) || 0;
+      const pnlPct = entry ? (side === 'sell' ? (entry - exitPrice) / entry : (exitPrice - entry) / entry) : 0;
+      await trade.update({
+        status: 'closed',
+        exitPrice,
+        closedAt: new Date(),
+        closeReason: 'demo_close',
+        pnlPct,
+      });
+    }
+    return {
+      success: true,
+      broker: brokerId,
+      ticket,
+      symbol,
+      side,
+      executedPrice: exitPrice,
+      brokerAccountId,
+      raw: { mode: 'demo' },
+    };
   }
 
   async execute(order: UnifiedOrder): Promise<OrderResult> {
     try {
-      const { adapter, brokerAccountId } = await this.resolveAdapter(order);
-      const result = await adapter.executeOrder(order);
+      const { adapter, brokerAccountId, executionMode } = await this.resolveAdapter(order);
+      const result =
+        executionMode === 'demo'
+          ? await this.paperFill(order, adapter, brokerAccountId)
+          : await adapter.executeOrder(order);
       if (brokerAccountId) {
         result.brokerAccountId = brokerAccountId;
       }
@@ -55,7 +160,7 @@ class TradingEngine {
         );
       } else {
         engineLogger.info(
-          `Envío ${order.side} ${order.symbol} → ${order.broker} ticket=${result.ticket ?? '-'}`
+          `Envío ${executionMode === 'demo' ? 'DEMO ' : ''}${order.side} ${order.symbol} → ${order.broker} ticket=${result.ticket ?? '-'}`
         );
       }
       return result;
@@ -94,9 +199,17 @@ class TradingEngine {
 
       try {
         connected = await adapter.isConnected();
-        message = connected
-          ? 'Conexión activa y respondiendo.'
-          : 'El broker no respondió a la verificación.';
+        if (id === 'mt5') {
+          message = connected
+            ? 'OrionBridge respondió PONG.'
+            : 'Adjunta OrionBridge en un gráfico de MT4/MT5. El puente está listo, el EA no contestó el PING.';
+        } else if (id === 'bybit') {
+          message = connected
+            ? 'API pública de Bybit responde.'
+            : 'Bybit no está disponible desde este servidor.';
+        } else {
+          message = connected ? 'Conexión activa y respondiendo.' : 'API pública no respondió.';
+        }
       } catch (err: any) {
         const errMsg = err?.message || 'Error al verificar conexión';
         error = errMsg;
@@ -109,7 +222,7 @@ class TradingEngine {
         connected,
         enabled: true,
         message,
-        error: connected ? undefined : error || message,
+        error: connected ? undefined : error,
       });
     }
     return statuses;
@@ -140,6 +253,9 @@ class TradingEngine {
           brokerAccountId,
           brokerId,
         });
+        if (resolved.executionMode === 'demo') {
+          return this.listPaperPositions(userId, adapter, resolved.brokerId, resolved.accountId);
+        }
         const positions = await adapter.getPositions().catch(() => []);
         return positions.map((p) => ({ ...p, brokerAccountId: resolved.accountId }));
       } catch {
@@ -162,10 +278,14 @@ class TradingEngine {
           userId,
           brokerAccountId: account.id,
         });
-        const positions = await adapter.getPositions().catch(() => []);
-        allPositions.push(
-          ...positions.map((p) => ({ ...p, brokerAccountId: resolved.accountId }))
-        );
+        const positions =
+          resolved.executionMode === 'demo'
+            ? await this.listPaperPositions(userId, adapter, resolved.brokerId, resolved.accountId)
+            : (await adapter.getPositions().catch(() => [])).map((p) => ({
+                ...p,
+                brokerAccountId: resolved.accountId,
+              }));
+        allPositions.push(...positions);
       } catch {
         /* omitir cuentas sin adaptador */
       }
@@ -199,6 +319,9 @@ class TradingEngine {
           brokerId,
           requireActive: true,
         });
+        if (resolved.executionMode === 'demo' || String(ticket).startsWith('SIMULATED-')) {
+          return this.closePaperTrade(userId, ticket, adapter, brokerId, resolved.accountId);
+        }
         const result = await adapter.closePosition(ticket);
         result.brokerAccountId = resolved.accountId;
         return result;

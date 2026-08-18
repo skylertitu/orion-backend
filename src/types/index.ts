@@ -124,6 +124,7 @@ export interface BrokerAccountPublicView {
   accountName: string;
   accountType: BrokerAccountType;
   environment: BrokerEnvironment;
+  executionMode: 'demo' | 'live';
   externalRef: string | null;
   status: BrokerAccountStatus;
   isPrimary: boolean;

@@ -3,6 +3,7 @@ import { tradingEngine } from '../engine/TradingEngine';
 import { BrokerId, UnifiedOrder } from '../engine/engine.types';
 import { ApiResponse } from '../types';
 import { logger } from '../utils/logger';
+import { Trade } from '../models';
 
 function getUserId(req: Request): number | undefined {
   return (req as Request & { user?: { id: number } }).user?.id;
@@ -66,6 +67,28 @@ export const executeOrder = async (req: Request, res: Response) => {
       response.error = result.error;
       response.data = result;
       return res.status(400).json(response);
+    }
+
+    if (userId) {
+      try {
+        await Trade.create({
+          userId,
+          strategyId: null,
+          brokerAccountId: result.brokerAccountId ?? order.brokerAccountId ?? null,
+          broker: order.broker,
+          symbol: order.symbol.toUpperCase(),
+          side: order.side,
+          quantity: order.quantity ?? null,
+          lot: order.lot ?? null,
+          ticket: result.ticket != null ? String(result.ticket) : null,
+          status: 'open',
+          entryPrice: result.executedPrice || 0,
+          openedAt: new Date(),
+          raw: result.raw || null,
+        });
+      } catch (err: unknown) {
+        logger.warn(`[engine] Orden ok pero no se persistió: ${err instanceof Error ? err.message : err}`);
+      }
     }
 
     logger.info(

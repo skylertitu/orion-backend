@@ -19,6 +19,7 @@ import workerRoutes, { setWorkerInstance } from './routes/worker.routes';
 import { logger } from './utils/logger';
 import { ensureBootstrapAdmin } from './utils/roles';
 import { ensureSystemControls, isModuleEnabled } from './services/systemControl.service';
+import { ensureRiskSettings, isPausedByRiskSync } from './services/risk.service';
 import { setupMarketWs } from './routes/marketWs';
 
 dotenv.config();
@@ -94,6 +95,7 @@ const start = async () => {
     logger.info('Models synchronized');
     await ensureBootstrapAdmin();
     await ensureSystemControls();
+    await ensureRiskSettings();
     await initFirebaseAdmin();
 
     tradingEngine.register(new BinanceAdapter());
@@ -106,10 +108,10 @@ const start = async () => {
 
       const workerAllowed = process.env.WORKER_ENABLED !== 'false';
       void isModuleEnabled('worker').then((flagOn) => {
-        if (workerAllowed && flagOn) {
+        if (workerAllowed && flagOn && !isPausedByRiskSync()) {
           tradingWorker.start();
         } else {
-          logger.info('[TradingWorker] Deshabilitado por entorno o control de admin');
+          logger.info('[TradingWorker] Deshabilitado por entorno, control de admin o pausa de riesgo');
         }
       });
 

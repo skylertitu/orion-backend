@@ -5,6 +5,7 @@ import { BinanceAdapter } from './adapters/BinanceAdapter';
 import { BybitAdapter } from './adapters/BybitAdapter';
 import { MT5Adapter } from './adapters/MT5Adapter';
 import { ResolvedBrokerAccount, ResolveAccountOptions } from './account.types';
+import { executionModeOf } from './executionMode';
 import { BrokerId } from './engine.types';
 import { IBrokerAdapter } from './IBrokerAdapter';
 
@@ -26,6 +27,7 @@ function toResolved(account: BrokerAccount): ResolvedBrokerAccount {
     accountName: account.accountName,
     accountType: account.accountType,
     environment: account.environment,
+    executionMode: executionModeOf(account.meta, account.environment),
     externalRef: account.externalRef,
     status: account.status,
     meta: account.meta || {},

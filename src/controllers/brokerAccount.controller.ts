@@ -120,3 +120,23 @@ export const setPrimaryBrokerAccount = async (req: Request, res: Response) => {
     res.status(400).json(response);
   }
 };
+
+export const setBrokerAccountMode = async (req: Request, res: Response) => {
+  const response: ApiResponse = { success: true };
+  try {
+    const userId = Number(req.params.userId);
+    const accountId = Number(req.params.id);
+    if (!assertOwner(req, userId, res)) return;
+    const mode = req.body?.mode === 'live' ? 'live' : 'demo';
+    response.data = await brokerAccountService.setExecutionMode(userId, accountId, mode);
+    response.message =
+      mode === 'live'
+        ? 'Cuenta en LIVE: las órdenes salen al broker'
+        : 'Cuenta en DEMO: las órdenes se simulan';
+    res.json(response);
+  } catch (err: any) {
+    response.success = false;
+    response.error = err.message || 'Error al cambiar el modo de la cuenta';
+    res.status(400).json(response);
+  }
+};

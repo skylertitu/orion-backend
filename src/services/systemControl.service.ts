@@ -6,6 +6,7 @@ import { tradingEngine } from '../engine/TradingEngine';
 import { getWorkerInstance } from '../engine/workerRegistry';
 import { binancePublicGet } from './binancePublic';
 import { pingJupiter } from './jupiter.service';
+import { getRiskSnapshot, isPausedByRiskSync } from './risk.service';
 import SystemControl, { SystemModuleId } from '../models/SystemControl';
 import { BrokerAccount, Indicator } from '../models';
 import { logger } from '../utils/logger';
@@ -84,7 +85,7 @@ export async function setModuleEnabled(
   if (id === 'worker') {
     const worker = getWorkerInstance() as { start?: () => void; stop?: () => void } | null;
     try {
-      if (enabled) worker?.start?.();
+      if (enabled && !isPausedByRiskSync()) worker?.start?.();
       else worker?.stop?.();
     } catch (err) {
       logger.warn(`[system] No se pudo ${enabled ? 'iniciar' : 'detener'} el worker: ${(err as Error).message}`);
@@ -111,6 +112,7 @@ export async function getSystemStatus(): Promise<{
     firebaseAdmin: boolean;
     firebaseAuth: boolean;
   };
+  risk: Awaited<ReturnType<typeof getRiskSnapshot>> | null;
 }> {
   await ensureSystemControls();
 
@@ -162,7 +164,21 @@ export async function getSystemStatus(): Promise<{
     indicatorCount = 0;
   }
 
-  const jupiterPing = await pingJupiter();
+  const jupiterPing = await Promise.race([
+    pingJupiter(),
+    new Promise<{ ok: boolean; needsKey: boolean; detail: string; error?: string }>((resolve) =>
+      setTimeout(
+        () => resolve({ ok: false, needsKey: false, detail: 'Comprobando Jupiter…' }),
+        4000
+      )
+    ),
+  ]);
+  let risk: Awaited<ReturnType<typeof getRiskSnapshot>> | null = null;
+  try {
+    risk = await getRiskSnapshot();
+  } catch (err) {
+    logger.warn(`[system] Risk: ${(err as Error).message}`);
+  }
 
   const rows = await SystemControl.findAll();
   const notes = new Map(rows.map((row) => [row.id, row.note]));
@@ -186,7 +202,13 @@ export async function getSystemStatus(): Promise<{
       detail = workerStatus
         ? `Ciclos ${workerStatus.cycleCount ?? 0} · WS ${workerStatus.wsConnected ? 'live' : 'off'}`
         : 'Worker no inicializado';
-      if (workerErrors.length) error = workerErrors[workerErrors.length - 1];
+      if (risk?.pausedByRisk) {
+        health = 'paused';
+        detail = risk.pauseReason || 'Pausado por motor de riesgo';
+        error = risk.pauseReason || 'Pausado por riesgo';
+      } else if (workerErrors.length) {
+        error = workerErrors[workerErrors.length - 1];
+      }
     } else if (mod.id === 'lucy') {
       health = LUCY_INTEGRATION.pending || !LUCY_INTEGRATION.enabled ? 'pending' : 'ok';
       detail = LUCY_INTEGRATION.reason;
@@ -196,9 +218,18 @@ export async function getSystemStatus(): Promise<{
       if (!marketOk) error = marketError;
     } else if (mod.id === 'mt5') {
       const connected = metatraderService.isConnected();
-      health = !mtEnabledEnv ? 'paused' : connected ? 'ok' : 'down';
-      detail = mt?.message || (mtEnabledEnv ? (connected ? 'Puente conectado' : 'MT_ENABLED pero sin conexión') : 'MT_ENABLED=false');
-      if (mt?.error) error = mt.error;
+      if (!mtEnabledEnv) {
+        health = 'paused';
+        detail = 'MT_ENABLED=false. Actívalo en backend/.env si vas a usar MetaTrader.';
+      } else if (connected) {
+        health = 'ok';
+        detail = mt?.message || 'OrionBridge respondió PONG';
+      } else {
+        health = 'pending';
+        detail =
+          mt?.message ||
+          'Adjunta OrionBridge en un gráfico de MT4/MT5. El puente está listo, el EA no contestó el PING.';
+      }
     } else if (mod.id === 'indicators') {
       health = database ? 'ok' : 'down';
       detail = `${indicatorCount} scripts en base`;
@@ -206,9 +237,10 @@ export async function getSystemStatus(): Promise<{
       health = database ? 'ok' : 'down';
       detail = `${accountsConnected} cuentas conectadas`;
     } else if (mod.id === 'jupiter') {
-      health = jupiterPing.ok ? 'ok' : jupiterPing.needsKey ? 'pending' : 'down';
+      health = jupiterPing.needsKey ? 'pending' : jupiterPing.ok ? 'ok' : 'pending';
       detail = jupiterPing.detail;
-      if (!jupiterPing.ok) error = jupiterPing.error;
+      if (jupiterPing.needsKey) error = jupiterPing.error;
+      else if (!jupiterPing.ok && jupiterPing.error) error = jupiterPing.error;
     }
 
     if (!enabled && health === 'ok') health = 'paused';
@@ -236,5 +268,6 @@ export async function getSystemStatus(): Promise<{
       firebaseAdmin: isFirebaseAdminReady(),
       firebaseAuth: isFirebaseAuthReady(),
     },
+    risk,
   };
 }

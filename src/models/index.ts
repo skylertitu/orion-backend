@@ -10,6 +10,7 @@ import Indicator from './Indicator';
 import IndicatorBlock from './IndicatorBlock';
 import SystemControl from './SystemControl';
 import IntegrationSecret from './IntegrationSecret';
+import RiskSettings from './RiskSettings';
 
 User.hasMany(Strategy, { foreignKey: 'userId', as: 'strategies', onDelete: 'CASCADE' });
 Strategy.belongsTo(User, { foreignKey: 'userId', as: 'user' });
@@ -45,4 +46,4 @@ WalletTransfer.belongsTo(Wallet, { foreignKey: 'walletId', as: 'wallet' });
 User.hasMany(Indicator, { foreignKey: 'userId', as: 'indicators', onDelete: 'CASCADE' });
 Indicator.belongsTo(User, { foreignKey: 'userId', as: 'user' });
 
-export { User, Strategy, BrokerAccount, Signal, Trade, Wallet, WalletNonce, WalletTransfer, Indicator, IndicatorBlock, SystemControl, IntegrationSecret };
+export { User, Strategy, BrokerAccount, Signal, Trade, Wallet, WalletNonce, WalletTransfer, Indicator, IndicatorBlock, SystemControl, IntegrationSecret, RiskSettings };

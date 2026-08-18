@@ -5,6 +5,7 @@ import {
   getBrokerAccount,
   listBrokerAccounts,
   setPrimaryBrokerAccount,
+  setBrokerAccountMode,
   testBrokerAccountConnection,
   updateBrokerAccount,
 } from '../controllers/brokerAccount.controller';
@@ -21,5 +22,6 @@ router.patch('/:userId/:id', authMiddleware, updateBrokerAccount);
 router.delete('/:userId/:id', authMiddleware, deleteBrokerAccount);
 router.post('/:userId/:id/test', authMiddleware, testBrokerAccountConnection);
 router.post('/:userId/:id/set-primary', authMiddleware, setPrimaryBrokerAccount);
+router.post('/:userId/:id/mode', authMiddleware, setBrokerAccountMode);
 
 export default router;
