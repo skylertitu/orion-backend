@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import { walletService } from '../services/wallet.service';
+import { getOnChainSolBalance, getSolanaNetworkStatus, requestDevnetAirdrop } from '../services/solana.service';
 import { ApiResponse } from '../types';
 import { logger } from '../utils/logger';
 
@@ -24,10 +25,45 @@ export const listWallets = async (req: Request, res: Response) => {
   }
 };
 
+export const getWalletNetwork = async (_req: Request, res: Response) => {
+  const response: ApiResponse = { success: true, data: getSolanaNetworkStatus() };
+  res.json(response);
+};
+
+export const getWalletBalance = async (req: Request, res: Response) => {
+  const response: ApiResponse = { success: true };
+  try {
+    const address = String(req.query.address || '');
+    response.data = await getOnChainSolBalance(address);
+    res.json(response);
+  } catch (err: any) {
+    return fail(res, response, err);
+  }
+};
+
+export const requestWalletAirdrop = async (req: Request, res: Response) => {
+  const response: ApiResponse = { success: true };
+  try {
+    const address = String(req.body?.address || '');
+    const amount = Number(req.body?.amount || 1);
+    response.data = await requestDevnetAirdrop(address, amount);
+    response.message = 'SOL de prueba acreditado en Devnet';
+    res.status(201).json(response);
+  } catch (err: any) {
+    return fail(res, response, err);
+  }
+};
+
 export const createWalletNonce = async (req: Request, res: Response) => {
   const response: ApiResponse = { success: true };
   try {
-    response.data = await walletService.createNonce(userId(req));
+    const address = String(req.body?.address || '');
+    if (!address) {
+      response.success = false;
+      response.error = 'Falta address';
+      return res.status(400).json(response);
+    }
+    response.data = await walletService.createNonce(userId(req), address);
     res.json(response);
   } catch (err: any) {
     return fail(res, response, err);

@@ -1,6 +1,8 @@
 import IntegrationSecret from '../models/IntegrationSecret';
 import { decryptSecret, encryptSecret } from '../utils/crypto';
 import { findJupiterToken, JUPITER_TOKENS, JupiterToken } from '../config/jupiterTokens';
+import { explorerTxUrl, getSolanaCluster, getSolanaExecutionMode } from '../config/solana';
+import { pingSolanaRpc } from '../services/solana.service';
 import { logger } from '../utils/logger';
 
 const PRICE_URL = 'https://api.jup.ag/price/v3';
@@ -46,6 +48,9 @@ export type JupiterExecuteResult = {
   inputAmountResult?: string;
   outputAmountResult?: string;
   solscanUrl?: string;
+  simulated?: boolean;
+  cluster?: string;
+  executionMode?: string;
 };
 
 export type JupiterStatus = {
@@ -55,6 +60,13 @@ export type JupiterStatus = {
   keyHint: string | null;
   error?: string;
   sample?: { symbol: string; usdPrice: number };
+  solana?: {
+    cluster: string;
+    executionMode: string;
+    rpcOk: boolean;
+    rpcHost: string;
+    error?: string;
+  };
 };
 
 function maskKey(key: string): string {
@@ -246,6 +258,12 @@ export async function getJupiterOrder(
   if (takerAddr.length < 32) {
     throw Object.assign(new Error('Conecta Phantom para firmar el swap'), { status: 400 });
   }
+  if (getSolanaExecutionMode() === 'demo') {
+    throw Object.assign(
+      new Error('Estás en Demo/Devnet. Usa simular swap; el execute de Jupiter es Mainnet.'),
+      { status: 400 }
+    );
+  }
 
   const { key } = await getJupiterApiKey();
   if (!key) {
@@ -301,6 +319,12 @@ export async function executeJupiterSwap(signedTransaction: string, requestId: s
   if (!signedTransaction?.trim() || !requestId?.trim()) {
     throw Object.assign(new Error('Falta la transacción firmada o el requestId'), { status: 400 });
   }
+  if (getSolanaExecutionMode() === 'demo') {
+    throw Object.assign(
+      new Error('Estás en Demo/Devnet. Usa simular swap; el execute de Jupiter es Mainnet.'),
+      { status: 400 }
+    );
+  }
   const { key } = await getJupiterApiKey();
   if (!key) {
     throw Object.assign(new Error('Falta la API key de Jupiter Portal'), { status: 401, code: 'JUPITER_KEY' });
@@ -335,12 +359,48 @@ export async function executeJupiterSwap(signedTransaction: string, requestId: s
     code: payload.code,
     inputAmountResult: payload.inputAmountResult,
     outputAmountResult: payload.outputAmountResult,
-    solscanUrl: signature ? `https://solscan.io/tx/${signature}` : undefined,
+    solscanUrl: signature ? explorerTxUrl(signature) : undefined,
+    cluster: getSolanaCluster(),
+    executionMode: getSolanaExecutionMode(),
+  };
+}
+
+export async function simulateJupiterSwap(
+  inputSymbol: string,
+  outputSymbol: string,
+  amountUi: number
+): Promise<JupiterExecuteResult & { quote: JupiterQuoteResult }> {
+  if (getSolanaExecutionMode() === 'live' && getSolanaCluster() === 'mainnet-beta') {
+    throw Object.assign(
+      new Error('En LIVE/Mainnet el swap debe firmarse en Phantom. No se simula.'),
+      { status: 400 }
+    );
+  }
+  const quote = await getJupiterQuote(inputSymbol, outputSymbol, amountUi);
+  const signature = `SIMULATED-${Date.now()}`;
+  return {
+    status: 'Success',
+    signature,
+    simulated: true,
+    cluster: getSolanaCluster(),
+    executionMode: getSolanaExecutionMode(),
+    inputAmountResult: quote.inAmount,
+    outputAmountResult: quote.outAmount,
+    solscanUrl: undefined,
+    quote,
   };
 }
 
 export async function getJupiterStatus(): Promise<JupiterStatus> {
   const { key, source } = await getJupiterApiKey();
+  const rpc = await pingSolanaRpc();
+  const solana = {
+    cluster: rpc.cluster,
+    executionMode: rpc.executionMode,
+    rpcOk: rpc.ok,
+    rpcHost: rpc.rpcHost,
+    error: rpc.error,
+  };
   if (!key) {
     return {
       connected: false,
@@ -348,6 +408,7 @@ export async function getJupiterStatus(): Promise<JupiterStatus> {
       keySource: 'none',
       keyHint: null,
       error: 'Crea una API key en portal.jup.ag y pégala en Integraciones',
+      solana,
     };
   }
 
@@ -361,6 +422,7 @@ export async function getJupiterStatus(): Promise<JupiterStatus> {
       keyHint: maskKey(key),
       sample: sol && sol.usdPrice != null ? { symbol: 'SOL', usdPrice: sol.usdPrice } : undefined,
       error: sol ? undefined : 'La API respondió pero sin precio de SOL',
+      solana,
     };
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Jupiter no responde';
@@ -371,6 +433,7 @@ export async function getJupiterStatus(): Promise<JupiterStatus> {
       keySource: source,
       keyHint: maskKey(key),
       error: message,
+      solana,
     };
   }
 }
@@ -381,7 +444,7 @@ export async function pingJupiter(): Promise<{ ok: boolean; needsKey: boolean; d
     ok: status.connected,
     needsKey: !status.hasKey,
     detail: status.connected
-      ? `SOL $${status.sample?.usdPrice?.toFixed(2) ?? '—'}`
+      ? `SOL $${status.sample?.usdPrice?.toFixed(2) ?? '—'} · ${status.solana?.cluster}/${status.solana?.executionMode}`
       : status.error || 'Sin conexión',
     error: status.connected ? undefined : status.error,
   };
