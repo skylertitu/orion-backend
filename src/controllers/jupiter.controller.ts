@@ -7,6 +7,7 @@ import {
   getJupiterQuote,
   getJupiterOrder,
   executeJupiterSwap,
+  simulateJupiterSwap,
   getJupiterStatus,
   setJupiterApiKey,
 } from '../services/jupiter.service';
@@ -124,6 +125,44 @@ export const jupiterExecute = async (req: AuthRequest, res: Response) => {
       response.success = false;
       return res.status(400).json(response);
     }
+    res.json(response);
+  } catch (err: unknown) {
+    const { message, status } = fail(err);
+    response.success = false;
+    response.error = message;
+    res.status(status).json(response);
+  }
+};
+
+export const jupiterSimulate = async (req: AuthRequest, res: Response) => {
+  const response: ApiResponse = { success: true };
+  try {
+    const taker = String(req.body?.taker || '');
+    const input = String(req.body?.input || 'SOL');
+    const output = String(req.body?.output || 'USDC');
+    const amount = Number(req.body?.amount || 0);
+    if (!taker) {
+      response.success = false;
+      response.error = 'Conecta Phantom para simular el swap';
+      return res.status(400).json(response);
+    }
+    const result = await simulateJupiterSwap(input, output, amount);
+    let transfer = null;
+    if (req.user?.id) {
+      try {
+        transfer = await walletService.recordSwap(
+          req.user.id,
+          taker,
+          { symbol: input, amount },
+          { symbol: output, amount: result.quote.outUi },
+          result
+        );
+      } catch (err) {
+        logger.warn(`[jupiter] simulación ok pero no se registró: ${err instanceof Error ? err.message : err}`);
+      }
+    }
+    response.data = { ...result, transfer };
+    response.message = `Swap DEMO simulado en ${result.cluster}`;
     res.json(response);
   } catch (err: unknown) {
     const { message, status } = fail(err);

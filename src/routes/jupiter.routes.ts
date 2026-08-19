@@ -8,6 +8,7 @@ import {
   jupiterQuote,
   jupiterOrder,
   jupiterExecute,
+  jupiterSimulate,
 } from '../controllers/jupiter.controller';
 
 const router = Router();
@@ -19,5 +20,6 @@ router.get('/prices', jupiterPrices);
 router.get('/quote', jupiterQuote);
 router.get('/order', authMiddleware, jupiterOrder);
 router.post('/execute', authMiddleware, jupiterExecute);
+router.post('/simulate', authMiddleware, jupiterSimulate);
 
 export default router;

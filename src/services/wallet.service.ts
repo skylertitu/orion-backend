@@ -2,6 +2,7 @@ import crypto from 'crypto';
 import { Op } from 'sequelize';
 import sequelize from '../config/database';
 import { User, Wallet, WalletNonce, WalletTransfer } from '../models';
+import { getSolanaCluster, getSolanaExecutionMode } from '../config/solana';
 import {
   buildWalletLinkMessage,
   isSolanaAddress,
@@ -59,16 +60,30 @@ export class WalletService {
     return wallets.map(toPublicWallet);
   }
 
-  async createNonce(userId: number) {
+  async createNonce(userId: number, address: string) {
+    const walletAddress = address.trim();
+    if (!isSolanaAddress(walletAddress)) {
+      throw httpError('Dirección Solana inválida', 400);
+    }
     const nonce = crypto.randomBytes(16).toString('hex');
     const issuedAt = new Date();
+    const issuedAtIso = issuedAt.toISOString();
     const expiresAt = new Date(issuedAt.getTime() + NONCE_TTL_MS);
     await WalletNonce.create({ userId, nonce, expiresAt });
     return {
       nonce,
-      issuedAt: issuedAt.toISOString(),
+      issuedAt: issuedAtIso,
       expiresAt: expiresAt.toISOString(),
       chain: 'solana' as const,
+      address: walletAddress,
+      cluster: getSolanaCluster(),
+      executionMode: getSolanaExecutionMode(),
+      message: buildWalletLinkMessage({
+        userId,
+        address: walletAddress,
+        nonce,
+        issuedAt: issuedAtIso,
+      }),
     };
   }
 
@@ -241,6 +256,7 @@ export class WalletService {
     }
 
     const ok = result.status === 'Success';
+    const simulated = Boolean(result.signature?.startsWith('SIMULATED-'));
     const transfer = await WalletTransfer.create({
       userId,
       walletId: wallet.id,
@@ -253,7 +269,7 @@ export class WalletService {
       toAddress: taker,
       txHash: result.signature || null,
       note: ok
-        ? `Jupiter ${input.symbol} → ${output.symbol}${output.amount != null ? ` · out ${output.amount}` : ''}`
+        ? `${simulated ? 'DEMO ' : ''}Jupiter ${input.symbol} → ${output.symbol}${output.amount != null ? ` · out ${output.amount}` : ''}`
         : result.error || 'Swap fallido',
       processedAt: new Date(),
     });

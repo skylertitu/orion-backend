@@ -2,7 +2,9 @@ allowBuilds:
   '@firebase/util': true
   '@scarf/scarf': true
   bcrypt: true
+  bufferutil: true
   esbuild: false
   protobufjs: true
   unrs-resolver: false
+  utf-8-validate: true
   zeromq: true
