@@ -230,7 +230,8 @@ export class WalletService {
     taker: string,
     input: { symbol: string; amount: number },
     output: { symbol: string; amount?: number },
-    result: { status: string; signature?: string; error?: string }
+    result: { status: string; signature?: string; error?: string },
+    label?: string
   ) {
     if (!isSolanaAddress(taker)) {
       throw httpError('Dirección taker inválida', 400);
@@ -246,7 +247,7 @@ export class WalletService {
         userId,
         chain: 'solana',
         address: taker,
-        label: 'Phantom',
+        label: label?.trim() || 'Solana',
         isPrimary: !hasPrimary,
         verifiedAt: new Date(),
         lastUsedAt: new Date(),

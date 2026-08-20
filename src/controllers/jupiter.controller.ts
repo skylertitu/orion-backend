@@ -99,6 +99,7 @@ export const jupiterExecute = async (req: AuthRequest, res: Response) => {
     const input = String(req.body?.input || 'SOL');
     const output = String(req.body?.output || 'USDC');
     const amount = Number(req.body?.amount || 0);
+    const walletLabel = String(req.body?.walletLabel || '');
     const result = await executeJupiterSwap(signedTransaction, requestId);
     const outputToken = findJupiterToken(output);
     const outputAmount =
@@ -113,7 +114,8 @@ export const jupiterExecute = async (req: AuthRequest, res: Response) => {
           taker,
           { symbol: input, amount },
           { symbol: output, amount: Number.isFinite(outputAmount) ? outputAmount : undefined },
-          result
+          result,
+          walletLabel
         );
       } catch (err) {
         logger.warn(`[jupiter] swap ejecutado pero no se registró: ${err instanceof Error ? err.message : err}`);
@@ -141,9 +143,10 @@ export const jupiterSimulate = async (req: AuthRequest, res: Response) => {
     const input = String(req.body?.input || 'SOL');
     const output = String(req.body?.output || 'USDC');
     const amount = Number(req.body?.amount || 0);
+    const walletLabel = String(req.body?.walletLabel || '');
     if (!taker) {
       response.success = false;
-      response.error = 'Conecta Phantom para simular el swap';
+      response.error = 'Conecta una billetera para simular el swap';
       return res.status(400).json(response);
     }
     const result = await simulateJupiterSwap(input, output, amount);
@@ -155,7 +158,8 @@ export const jupiterSimulate = async (req: AuthRequest, res: Response) => {
           taker,
           { symbol: input, amount },
           { symbol: output, amount: result.quote.outUi },
-          result
+          result,
+          walletLabel
         );
       } catch (err) {
         logger.warn(`[jupiter] simulación ok pero no se registró: ${err instanceof Error ? err.message : err}`);
