@@ -1,7 +1,7 @@
+import './config/loadEnv';
 import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
-import dotenv from 'dotenv';
 import swaggerUi from 'swagger-ui-express';
 import sequelize from './config/database';
 import { cleanupOrphanTables } from './config/cleanupDatabase';
@@ -24,8 +24,6 @@ import { ensureBootstrapAdmin } from './utils/roles';
 import { ensureSystemControls, isModuleEnabled } from './services/systemControl.service';
 import { ensureRiskSettings, isPausedByRiskSync } from './services/risk.service';
 import { setupMarketWs } from './routes/marketWs';
-
-dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT || 3008;
@@ -84,7 +82,7 @@ async function syncDatabase(): Promise<void> {
     return;
   }
   if (mode === 'alter') {
-    logger.info('[DB] Sync con alter (puede tardar 20–60s en Neon)...');
+    logger.info('[DB] Sync con alter (puede tardar en Postgres remoto)...');
     await sequelize.sync({ alter: true });
     return;
   }
@@ -146,6 +144,11 @@ const start = async () => {
     if (process.env.DATABASE_URL?.includes('neon.tech')) {
       logger.error(
         '[Database] Si Neon falla por red, verifica que el compute no esté suspendido en el dashboard de Neon.'
+      );
+    }
+    if (process.env.DATABASE_URL?.includes('render.com') || process.env.DATABASE_URL?.includes('dpg-')) {
+      logger.error(
+        '[Database] Usa Internal Database URL en orion-backend → Environment. El Postgres de Render exige SSL (ya va activado).'
       );
     }
     process.exit(1);

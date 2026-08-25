@@ -1,7 +1,8 @@
+import '../config/loadEnv';
 import jwt, { SignOptions } from 'jsonwebtoken';
 
 const SECRET: string = process.env.JWT_SECRET || (() => {
-  throw new Error('JWT_SECRET no está configurado en el archivo .env');
+  throw new Error('JWT_SECRET no está configurado');
 })();
 
 export interface TokenPayload {

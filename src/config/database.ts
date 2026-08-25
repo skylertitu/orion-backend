@@ -1,20 +1,31 @@
 import { Sequelize, Options } from 'sequelize';
-import dotenv from 'dotenv';
+import './loadEnv';
 
-dotenv.config();
-
-const dbUri = process.env.DATABASE_URL;
+const dbUri = process.env.DATABASE_URL?.trim();
 const dbName = process.env.DB_NAME || 'orion';
 const dbUser = process.env.DB_USER || 'postgres';
 const dbPassword = process.env.DB_PASSWORD || 'postgres';
 const dbHost = process.env.DB_HOST || 'localhost';
 const dbPort = parseInt(process.env.DB_PORT || '5432', 10);
 
+function hostnameFromUri(uri?: string): string | null {
+  if (!uri) return null;
+  try {
+    return new URL(uri).hostname;
+  } catch {
+    return null;
+  }
+}
+
+const uriHost = hostnameFromUri(dbUri);
+const effectiveHost = uriHost || dbHost;
 const isNeon = Boolean(dbUri?.includes('neon.tech'));
-const isLocalHost = ['localhost', '127.0.0.1'].includes(dbHost);
+const isRender = Boolean(dbUri?.includes('render.com') || effectiveHost.startsWith('dpg-'));
+const isLocalHost = ['localhost', '127.0.0.1'].includes(effectiveHost);
 const useSsl =
   process.env.DB_SSL === 'true' ||
   isNeon ||
+  isRender ||
   (!isLocalHost && Boolean(dbUri));
 
 function buildDialectOptions(): Options['dialectOptions'] {
