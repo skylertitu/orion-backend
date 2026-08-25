@@ -2,12 +2,12 @@ import { Request, Response, NextFunction } from 'express';
 import { ApiResponse } from '../types';
 import { TokenPayload } from '../utils/jwt';
 import { User } from '../models';
-import { isStaffRole } from '../utils/roles';
+import { isSuperAdminRole } from '../utils/roles';
 
 /**
- * Admin de desk: Lucy, motor, módulos, planes. También deja pasar a superadmin.
+ * Superadmin: control total de usuarios y datos. Bloquear, roles, borrar, editar.
  */
-export const adminMiddleware = async (req: Request, res: Response, next: NextFunction) => {
+export const superadminMiddleware = async (req: Request, res: Response, next: NextFunction) => {
   const response: ApiResponse = { success: false };
   const tokenUser = (req as Request & { user?: TokenPayload }).user;
 
@@ -18,11 +18,11 @@ export const adminMiddleware = async (req: Request, res: Response, next: NextFun
 
   try {
     const dbUser = await User.findByPk(tokenUser.id, { attributes: ['id', 'role'] });
-    if (!dbUser || !isStaffRole(dbUser.role)) {
-      response.error = 'Acceso denegado. Se requieren permisos de administrador';
+    if (!dbUser || !isSuperAdminRole(dbUser.role)) {
+      response.error = 'Acceso denegado. Se requiere rol superadmin';
       return res.status(403).json(response);
     }
-    tokenUser.role = dbUser.role;
+    tokenUser.role = 'superadmin';
     next();
   } catch {
     response.error = 'Error al verificar permisos';

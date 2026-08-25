@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import { ApiResponse } from '../types';
 import { TokenPayload, verifyToken } from '../utils/jwt';
+import { isStaffRole } from '../utils/roles';
 import {
   getSystemStatus,
   setModuleEnabled,
@@ -22,7 +23,7 @@ export const getSystemOverview = async (req: Request, res: Response) => {
   const response: ApiResponse = { success: true };
   try {
     const full = await getSystemStatus();
-    if (requestRole(req) === 'admin') {
+    if (isStaffRole(requestRole(req))) {
       response.data = full;
     } else {
       response.data = {

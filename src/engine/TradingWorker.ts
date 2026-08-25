@@ -1,3 +1,4 @@
+import { Op } from 'sequelize';
 import { binanceWs, WsKline, MarketSnapshot } from '../services/binanceWs';
 import { spreadAnalyzer, SpreadConfig, SpreadSignal } from '../services/spreadAnalyzer';
 import { lucyOrchestrator } from '../services/lucyOrchestrator.service';
@@ -8,6 +9,7 @@ import { UnifiedOrder, BrokerId } from './engine.types';
 import Strategy from '../models/Strategy';
 import Signal from '../models/Signal';
 import Trade from '../models/Trade';
+import { User } from '../models';
 import { workerLogger, tradeLogger } from '../utils/logger';
 import { assertCanOpen, isPausedByRiskSync, recordBrokerResult } from '../services/risk.service';
 
@@ -199,7 +201,14 @@ export class TradingWorker {
     this.lastCycleAt = new Date().toISOString();
 
     try {
-      const strategies = await Strategy.findAll({ where: { isActive: true } });
+      const admins = await User.findAll({
+        where: { role: { [Op.in]: ['admin', 'superadmin'] } },
+        attributes: ['id'],
+      });
+      const adminIds = admins.map((row) => row.id);
+      const strategies = adminIds.length
+        ? await Strategy.findAll({ where: { isActive: true, userId: { [Op.in]: adminIds } } })
+        : [];
 
       for (const strategy of strategies) {
         try {

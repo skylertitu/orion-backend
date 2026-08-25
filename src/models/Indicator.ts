@@ -8,6 +8,7 @@ export interface IndicatorAttributes {
   name: string;
   source: string;
   sourceHash: string;
+  category: string;
   enabled: boolean;
   blocked: boolean;
   createdAt?: Date;
@@ -21,6 +22,7 @@ class Indicator extends Model<IndicatorAttributes> implements IndicatorAttribute
   public name!: string;
   public source!: string;
   public sourceHash!: string;
+  public category!: string;
   public enabled!: boolean;
   public blocked!: boolean;
   public readonly createdAt!: Date;
@@ -49,6 +51,11 @@ Indicator.init(
     source: {
       type: DataTypes.TEXT,
       allowNull: false,
+    },
+    category: {
+      type: DataTypes.STRING(32),
+      allowNull: false,
+      defaultValue: 'custom',
     },
     sourceHash: {
       type: DataTypes.STRING(64),
@@ -79,3 +86,20 @@ Indicator.init(
 );
 
 export default Indicator;
+
+export async function ensureIndicatorCategoryColumn(): Promise<void> {
+  const qi = sequelize.getQueryInterface();
+  let table: Record<string, unknown>;
+  try {
+    table = await qi.describeTable('indicators');
+  } catch {
+    return;
+  }
+  if (!table.category) {
+    await qi.addColumn('indicators', 'category', {
+      type: DataTypes.STRING(32),
+      allowNull: false,
+      defaultValue: 'custom',
+    });
+  }
+}

@@ -2,7 +2,10 @@
   "name": "autotrading-backend",
   "version": "1.0.0",
   "description": "Auto trading backend API",
-  "main": "src/app.ts",
+  "main": "dist/app.js",
+  "engines": {
+    "node": "20.x"
+  },
   "scripts": {
     "dev": "tsx watch src/app.ts",
     "start": "node dist/app.js",

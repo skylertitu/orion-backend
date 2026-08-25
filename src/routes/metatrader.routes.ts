@@ -1,5 +1,7 @@
 import { Router } from 'express';
 import { authMiddleware } from '../middlewares/auth.middleware';
+import { requireModule } from '../middlewares/module.middleware';
+import { requireCapability } from '../middlewares/plan.middleware';
 import {
   getMtStatus,
   getMtSymbols,
@@ -8,14 +10,17 @@ import {
   closeMtPosition,
   closeAllMtPositions,
 } from '../controllers/metatrader.controller';
+import { tradingLimiter } from '../middlewares/rateLimiter';
 
 const router = Router();
 
-router.get('/status', authMiddleware, getMtStatus);
-router.get('/symbols', authMiddleware, getMtSymbols);
-router.get('/positions', authMiddleware, getMtPositions);
-router.post('/order', authMiddleware, executeMtOrder);
-router.delete('/positions/:ticket', authMiddleware, closeMtPosition);
-router.delete('/positions', authMiddleware, closeAllMtPositions);
+router.use(authMiddleware, requireModule('trading'), requireCapability('manual_orders'));
+
+router.get('/status', getMtStatus);
+router.get('/symbols', getMtSymbols);
+router.get('/positions', getMtPositions);
+router.post('/order', tradingLimiter, executeMtOrder);
+router.delete('/positions/:ticket', tradingLimiter, closeMtPosition);
+router.delete('/positions', tradingLimiter, closeAllMtPositions);
 
 export default router;

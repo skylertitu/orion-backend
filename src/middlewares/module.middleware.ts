@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import { verifyToken } from '../utils/jwt';
 import { isModuleEnabled, SystemModuleId } from '../services/systemControl.service';
+import { isStaffRole } from '../utils/roles';
 import { ApiResponse } from '../types';
 
 function requestRole(req: Request): string | undefined {
@@ -15,7 +16,7 @@ export function requireModule(id: SystemModuleId) {
   return async (req: Request, res: Response, next: NextFunction) => {
     try {
       if (await isModuleEnabled(id)) return next();
-      if (requestRole(req) === 'admin') return next();
+      if (isStaffRole(requestRole(req))) return next();
       const response: ApiResponse = {
         success: false,
         error: 'Este módulo está desactivado temporalmente por administración',
@@ -23,7 +24,12 @@ export function requireModule(id: SystemModuleId) {
       };
       return res.status(503).json(response);
     } catch {
-      return next();
+      const response: ApiResponse = {
+        success: false,
+        error: 'No se pudo verificar el estado del módulo',
+        data: { module: id },
+      };
+      return res.status(503).json(response);
     }
   };
 }

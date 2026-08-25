@@ -15,3 +15,19 @@ export const walletLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
 });
+
+export const tradingLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 40,
+  message: { success: false, error: 'Demasiadas órdenes. Espera un momento.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+export const adminLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 60,
+  message: { success: false, error: 'Demasiadas peticiones de administración.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
