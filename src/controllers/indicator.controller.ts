@@ -22,6 +22,7 @@ function publicRow(row: Indicator) {
     name: row.name,
     source: row.source,
     sourceHash: row.sourceHash,
+    category: row.category || 'custom',
     enabled: row.enabled && !row.blocked,
     blocked: row.blocked,
   };
@@ -38,9 +39,11 @@ function normalizeIncoming(raw: unknown): Array<{
   name: string;
   source: string;
   enabled: boolean;
+  category: string;
 }> {
   if (!Array.isArray(raw)) return [];
-  const out: Array<{ clientId: string; name: string; source: string; enabled: boolean }> = [];
+  const allowed = new Set(['trend', 'oscillator', 'sessions', 'volume', 'custom']);
+  const out: Array<{ clientId: string; name: string; source: string; enabled: boolean; category: string }> = [];
   for (const item of raw.slice(0, MAX_SCRIPTS)) {
     if (!item || typeof item !== 'object') continue;
     const row = item as Record<string, unknown>;
@@ -53,11 +56,13 @@ function normalizeIncoming(raw: unknown): Array<{
           ? row.id.trim().slice(0, 80)
           : '';
     if (!clientId) continue;
+    const categoryRaw = typeof row.category === 'string' ? row.category : 'custom';
     out.push({
       clientId,
       name: typeof row.name === 'string' && row.name.trim() ? row.name.trim().slice(0, 120) : 'Indicador',
       source,
       enabled: row.enabled !== false,
+      category: allowed.has(categoryRaw) ? categoryRaw : 'custom',
     });
   }
   return out;
@@ -99,6 +104,7 @@ export const saveMine = async (req: Request, res: Response) => {
       name: item.name,
       source: item.source,
       sourceHash,
+      category: item.category,
       enabled: blocked ? false : item.enabled,
       blocked,
     };
@@ -129,6 +135,7 @@ export const listPopular = async (req: Request, res: Response) => {
       'sourceHash',
       [fn('MIN', col('name')), 'name'],
       [fn('MIN', col('source')), 'source'],
+      [fn('MIN', col('category')), 'category'],
       [fn('COUNT', fn('DISTINCT', col('userId'))), 'users'],
       [fn('SUM', literal('CASE WHEN enabled THEN 1 ELSE 0 END')), 'inUse'],
     ],
@@ -149,6 +156,7 @@ export const listPopular = async (req: Request, res: Response) => {
     sourceHash: row.sourceHash,
     name: row.name,
     source: row.source,
+    category: row.category || 'custom',
     users: Number(row.users || 0),
     inUse: Number(row.inUse || 0),
   }));
@@ -174,6 +182,7 @@ export const clonePopular = async (req: Request, res: Response) => {
     name: sample.name,
     source: sample.source,
     sourceHash,
+    category: sample.category || 'custom',
     enabled: true,
     blocked: false,
   });

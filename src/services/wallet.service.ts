@@ -9,14 +9,29 @@ import {
   verifySolanaSignature,
 } from '../utils/solanaVerify';
 
-const NONCE_TTL_MS = 5 * 60 * 1000;
+const MAX_VERIFIED_WALLETS = 1;
+const MAX_MANUAL_WALLETS = 5;
 const MIN_AMOUNT = 0.001;
 const MAX_WITHDRAW = Number(process.env.WALLET_MAX_WITHDRAW || '10');
+const NONCE_TTL_MS = 10 * 60 * 1000;
+const WALLET_TAKEN = 'Esa billetera ya está vinculada a otra cuenta. Dos usuarios no pueden usar la misma wallet.';
 
 function httpError(message: string, status: number) {
   const err: any = new Error(message);
   err.status = status;
   return err;
+}
+
+function isUniqueConflict(err: any) {
+  return err?.name === 'SequelizeUniqueConstraintError' || err?.parent?.code === '23505';
+}
+
+async function requireAddressFree(address: string, userId: number) {
+  const taken = await Wallet.findOne({ where: { chain: 'solana', address } });
+  if (taken && taken.userId !== userId) {
+    throw httpError(WALLET_TAKEN, 409);
+  }
+  return taken;
 }
 
 function toPublicWallet(wallet: Wallet) {
@@ -27,7 +42,9 @@ function toPublicWallet(wallet: Wallet) {
     address: wallet.address,
     label: wallet.label,
     isPrimary: wallet.isPrimary,
-    verifiedAt: wallet.verifiedAt.toISOString(),
+    verified: wallet.verified !== false,
+    source: wallet.source || 'extension',
+    verifiedAt: wallet.verifiedAt ? wallet.verifiedAt.toISOString() : new Date().toISOString(),
     lastUsedAt: wallet.lastUsedAt ? wallet.lastUsedAt.toISOString() : null,
     createdAt: wallet.createdAt.toISOString(),
   };
@@ -65,6 +82,7 @@ export class WalletService {
     if (!isSolanaAddress(walletAddress)) {
       throw httpError('Dirección Solana inválida', 400);
     }
+    await requireAddressFree(walletAddress, userId);
     const nonce = crypto.randomBytes(16).toString('hex');
     const issuedAt = new Date();
     const issuedAtIso = issuedAt.toISOString();
@@ -110,33 +128,78 @@ export class WalletService {
       throw httpError('La firma no corresponde a esa billetera', 401);
     }
 
-    const taken = await Wallet.findOne({ where: { chain: 'solana', address } });
-    if (taken && taken.userId !== userId) {
-      throw httpError('Esa billetera ya está vinculada a otra cuenta', 409);
-    }
+    const taken = await requireAddressFree(address, userId);
 
     await nonceRow.update({ usedAt: new Date() });
 
     if (taken) {
       await taken.update({
         verifiedAt: new Date(),
+        verified: true,
+        source: 'extension',
         lastUsedAt: new Date(),
         label: input.label?.trim() || taken.label,
       });
       return toPublicWallet(taken);
     }
 
+    await this.assertVerifiedLimit(userId);
+
     const hasPrimary = await Wallet.findOne({ where: { userId, isPrimary: true } });
-    const wallet = await Wallet.create({
-      userId,
-      chain: 'solana',
-      address,
-      label: input.label?.trim() || 'Phantom',
-      isPrimary: !hasPrimary,
-      verifiedAt: new Date(),
-      lastUsedAt: new Date(),
-    });
-    return toPublicWallet(wallet);
+    try {
+      const wallet = await Wallet.create({
+        userId,
+        chain: 'solana',
+        address,
+        label: input.label?.trim() || 'Solana',
+        isPrimary: !hasPrimary,
+        verified: true,
+        source: 'extension',
+        verifiedAt: new Date(),
+        lastUsedAt: new Date(),
+      });
+      return toPublicWallet(wallet);
+    } catch (err) {
+      if (isUniqueConflict(err)) throw httpError(WALLET_TAKEN, 409);
+      throw err;
+    }
+  }
+
+  async linkManual(userId: number, input: { address: string; label?: string }) {
+    if (getSolanaCluster() === 'mainnet-beta' && getSolanaExecutionMode() === 'live') {
+      throw httpError('En Mainnet LIVE hay que firmar la billetera. Pégala solo en Devnet/DEMO.', 400);
+    }
+    const address = input.address.trim();
+    if (!isSolanaAddress(address)) {
+      throw httpError('Dirección Solana inválida', 400);
+    }
+    const taken = await requireAddressFree(address, userId);
+    if (taken) {
+      await taken.update({
+        lastUsedAt: new Date(),
+        label: input.label?.trim() || taken.label,
+      });
+      return toPublicWallet(taken);
+    }
+    await this.assertManualLimit(userId);
+    const hasPrimary = await Wallet.findOne({ where: { userId, isPrimary: true } });
+    try {
+      const wallet = await Wallet.create({
+        userId,
+        chain: 'solana',
+        address,
+        label: input.label?.trim() || 'Manual',
+        isPrimary: !hasPrimary,
+        verified: false,
+        source: 'manual',
+        verifiedAt: new Date(),
+        lastUsedAt: new Date(),
+      });
+      return toPublicWallet(wallet);
+    } catch (err) {
+      if (isUniqueConflict(err)) throw httpError(WALLET_TAKEN, 409);
+      throw err;
+    }
   }
 
   async setPrimary(userId: number, walletId: number) {
@@ -193,6 +256,9 @@ export class WalletService {
 
   async requestWithdraw(userId: number, walletId: number, amount: number, asset = 'SOL') {
     const wallet = await this.requireOwned(userId, walletId);
+    if (wallet.verified === false) {
+      throw httpError('Esta billetera se pegó a mano. Conéctala con Phantom o Solflare para retirar.', 400);
+    }
     this.assertAmount(amount);
     if (amount > MAX_WITHDRAW) {
       throw httpError(`El retiro máximo por operación es ${MAX_WITHDRAW} ${asset}`, 400);
@@ -235,22 +301,27 @@ export class WalletService {
     if (!isSolanaAddress(taker)) {
       throw httpError('Dirección taker inválida', 400);
     }
-    const existing = await Wallet.findOne({ where: { chain: 'solana', address: taker } });
-    if (existing && existing.userId !== userId) {
-      throw httpError('Esa billetera pertenece a otra cuenta', 409);
-    }
+    const existing = await requireAddressFree(taker, userId);
     let wallet = existing;
     if (!wallet) {
+      await this.assertVerifiedLimit(userId);
       const hasPrimary = await Wallet.findOne({ where: { userId, isPrimary: true } });
-      wallet = await Wallet.create({
-        userId,
-        chain: 'solana',
-        address: taker,
-        label: 'Phantom',
-        isPrimary: !hasPrimary,
-        verifiedAt: new Date(),
-        lastUsedAt: new Date(),
-      });
+      try {
+        wallet = await Wallet.create({
+          userId,
+          chain: 'solana',
+          address: taker,
+          label: 'Phantom',
+          isPrimary: !hasPrimary,
+          verified: true,
+          source: 'extension',
+          verifiedAt: new Date(),
+          lastUsedAt: new Date(),
+        });
+      } catch (err) {
+        if (isUniqueConflict(err)) throw httpError(WALLET_TAKEN, 409);
+        throw err;
+      }
     } else {
       await wallet.update({ lastUsedAt: new Date() });
     }
@@ -280,6 +351,20 @@ export class WalletService {
     const wallet = await Wallet.findOne({ where: { id: walletId, userId } });
     if (!wallet) throw httpError('Billetera no encontrada', 404);
     return wallet;
+  }
+
+  private async assertVerifiedLimit(userId: number) {
+    const count = await Wallet.count({ where: { userId, verified: true } });
+    if (count >= MAX_VERIFIED_WALLETS) {
+      throw httpError('Solo una wallet operativa. Desvincula la actual para conectar otra.', 409);
+    }
+  }
+
+  private async assertManualLimit(userId: number) {
+    const count = await Wallet.count({ where: { userId, source: 'manual' } });
+    if (count >= MAX_MANUAL_WALLETS) {
+      throw httpError(`Máximo ${MAX_MANUAL_WALLETS} wallets pegadas a mano.`, 409);
+    }
   }
 
   private assertAmount(amount: number) {

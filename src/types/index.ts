@@ -17,7 +17,12 @@ export interface UserAttributes {
   resetPasswordExpires?: Date | null;
   lastLoginAt?: Date | null;
   balance?: number;
-  role?: 'user' | 'admin';
+  role?: 'user' | 'admin' | 'superadmin';
+  plan?: string | null;
+  sessionVersion?: number;
+  blocked?: boolean;
+  blockedReason?: string | null;
+  blockedAt?: Date | null;
   createdAt?: Date;
   updatedAt?: Date;
 }

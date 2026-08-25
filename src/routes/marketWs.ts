@@ -14,14 +14,6 @@ interface WsClient {
 const clients = new Set<WsClient>();
 
 function tokenFromRequest(req: IncomingMessage): string | null {
-  try {
-    const host = req.headers.host || 'localhost';
-    const url = new URL(req.url || '/ws/market', `http://${host}`);
-    const queryToken = url.searchParams.get('token');
-    if (queryToken) return queryToken;
-  } catch {
-    /* ignore */
-  }
   const header = req.headers.authorization;
   if (header?.startsWith('Bearer ')) return header.slice(7);
   return null;

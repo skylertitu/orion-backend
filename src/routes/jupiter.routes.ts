@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { authMiddleware } from '../middlewares/auth.middleware';
 import { requireModule } from '../middlewares/module.middleware';
+import { requireCapability } from '../middlewares/plan.middleware';
 import {
   listJupiterTokens,
   jupiterStatus,
@@ -18,8 +19,8 @@ router.get('/tokens', listJupiterTokens);
 router.get('/status', jupiterStatus);
 router.get('/prices', jupiterPrices);
 router.get('/quote', jupiterQuote);
-router.get('/order', authMiddleware, jupiterOrder);
-router.post('/execute', authMiddleware, jupiterExecute);
-router.post('/simulate', authMiddleware, jupiterSimulate);
+router.get('/order', authMiddleware, requireCapability('jupiter_execute'), jupiterOrder);
+router.post('/execute', authMiddleware, requireCapability('jupiter_execute'), jupiterExecute);
+router.post('/simulate', authMiddleware, requireCapability('jupiter_execute'), jupiterSimulate);
 
 export default router;

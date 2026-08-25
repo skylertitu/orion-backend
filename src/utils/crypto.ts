@@ -1,15 +1,24 @@
 import crypto from 'crypto';
+import { logger } from './logger';
 
 const ALGO = 'aes-256-gcm';
 const IV_LENGTH = 16;
 const TAG_LENGTH = 16;
 
 function getEncryptionKey(): Buffer {
-  const secret = process.env.ENCRYPTION_KEY || process.env.JWT_SECRET;
-  if (!secret) {
-    throw new Error('ENCRYPTION_KEY o JWT_SECRET es requerido para cifrar credenciales');
+  const dedicated = (process.env.ENCRYPTION_KEY || '').trim();
+  if (dedicated) {
+    return crypto.createHash('sha256').update(dedicated).digest();
   }
-  return crypto.createHash('sha256').update(secret).digest();
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error('ENCRYPTION_KEY es obligatorio en producción');
+  }
+  const fallback = (process.env.JWT_SECRET || '').trim();
+  if (!fallback) {
+    throw new Error('ENCRYPTION_KEY es requerido para cifrar credenciales');
+  }
+  logger.warn('[crypto] ENCRYPTION_KEY no está definido; se usa JWT_SECRET solo en desarrollo');
+  return crypto.createHash('sha256').update(fallback).digest();
 }
 
 export function encryptSecret(plainText: string): string {

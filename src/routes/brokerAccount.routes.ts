@@ -11,17 +11,21 @@ import {
 } from '../controllers/brokerAccount.controller';
 import { authMiddleware } from '../middlewares/auth.middleware';
 import { requireModule } from '../middlewares/module.middleware';
+import { requireCapability } from '../middlewares/plan.middleware';
 
 const router = Router();
 
-router.get('/', authMiddleware, listBrokerAccounts);
-router.get('/:userId', authMiddleware, listBrokerAccounts);
-router.get('/:userId/:id', authMiddleware, getBrokerAccount);
-router.post('/', authMiddleware, requireModule('accounts'), createBrokerAccount);
-router.patch('/:userId/:id', authMiddleware, updateBrokerAccount);
-router.delete('/:userId/:id', authMiddleware, deleteBrokerAccount);
-router.post('/:userId/:id/test', authMiddleware, testBrokerAccountConnection);
-router.post('/:userId/:id/set-primary', authMiddleware, setPrimaryBrokerAccount);
-router.post('/:userId/:id/mode', authMiddleware, setBrokerAccountMode);
+router.use(authMiddleware);
+router.use(requireCapability('broker_accounts'));
+
+router.get('/', listBrokerAccounts);
+router.get('/:userId', listBrokerAccounts);
+router.get('/:userId/:id', getBrokerAccount);
+router.post('/', requireModule('accounts'), createBrokerAccount);
+router.patch('/:userId/:id', updateBrokerAccount);
+router.delete('/:userId/:id', deleteBrokerAccount);
+router.post('/:userId/:id/test', testBrokerAccountConnection);
+router.post('/:userId/:id/set-primary', setPrimaryBrokerAccount);
+router.post('/:userId/:id/mode', setBrokerAccountMode);
 
 export default router;

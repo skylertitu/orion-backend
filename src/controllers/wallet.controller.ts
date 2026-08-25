@@ -70,6 +70,23 @@ export const createWalletNonce = async (req: Request, res: Response) => {
   }
 };
 
+export const linkWalletManual = async (req: Request, res: Response) => {
+  const response: ApiResponse = { success: true };
+  try {
+    const { address, label } = req.body;
+    if (!address) {
+      response.success = false;
+      response.error = 'Falta address';
+      return res.status(400).json(response);
+    }
+    response.data = await walletService.linkManual(userId(req), { address, label });
+    response.message = 'Billetera vinculada en Devnet (sin firma)';
+    res.status(201).json(response);
+  } catch (err: any) {
+    return fail(res, response, err);
+  }
+};
+
 export const linkWallet = async (req: Request, res: Response) => {
   const response: ApiResponse = { success: true };
   try {

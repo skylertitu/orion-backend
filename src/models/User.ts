@@ -22,7 +22,12 @@ class User extends Model<UserAttributes> implements UserAttributes {
   public resetPasswordExpires!: Date | null;
   public lastLoginAt!: Date | null;
   public balance!: number;
-  public role!: 'user' | 'admin';
+  public role!: 'user' | 'admin' | 'superadmin';
+  public plan!: string | null;
+  public sessionVersion!: number;
+  public blocked!: boolean;
+  public blockedReason!: string | null;
+  public blockedAt!: Date | null;
 
   public readonly createdAt!: Date;
   public readonly updatedAt!: Date;
@@ -110,9 +115,32 @@ User.init(
       defaultValue: 0,
     },
     role: {
-      type: DataTypes.ENUM('user', 'admin'),
+      type: DataTypes.STRING(20),
       defaultValue: 'user',
       allowNull: false,
+    },
+    blocked: {
+      type: DataTypes.BOOLEAN,
+      allowNull: false,
+      defaultValue: false,
+    },
+    blockedReason: {
+      type: DataTypes.STRING(255),
+      allowNull: true,
+    },
+    blockedAt: {
+      type: DataTypes.DATE,
+      allowNull: true,
+    },
+    plan: {
+      type: DataTypes.STRING(20),
+      allowNull: true,
+      defaultValue: 'builder',
+    },
+    sessionVersion: {
+      type: DataTypes.INTEGER,
+      allowNull: false,
+      defaultValue: 0,
     },
   },
   {
@@ -122,16 +150,76 @@ User.init(
     hooks: {
       beforeCreate: async (user: User) => {
         if (user.password && !user.password.startsWith('$2b$')) {
-          user.password = await bcrypt.hash(user.password, 10);
+          user.password = await bcrypt.hash(user.password, 12);
         }
       },
       beforeUpdate: async (user: User) => {
         if (user.changed('password') && !user.password.startsWith('$2b$')) {
-          user.password = await bcrypt.hash(user.password, 10);
+          user.password = await bcrypt.hash(user.password, 12);
         }
       },
     },
   }
 );
+
+export function bumpSessionVersion(user: User): void {
+  user.sessionVersion = (Number(user.sessionVersion) || 0) + 1;
+}
+
+export async function ensureUserPlanColumn(): Promise<void> {
+  const qi = sequelize.getQueryInterface();
+  let table: Record<string, { type?: string }>;
+  try {
+    table = await qi.describeTable('users');
+  } catch {
+    return;
+  }
+  if (!table.plan) {
+    await qi.addColumn('users', 'plan', {
+      type: DataTypes.STRING(20),
+      allowNull: true,
+      defaultValue: 'builder',
+    });
+  }
+  if (!table.sessionVersion) {
+    await qi.addColumn('users', 'sessionVersion', {
+      type: DataTypes.INTEGER,
+      allowNull: false,
+      defaultValue: 0,
+    });
+  }
+  if (!table.blocked) {
+    await qi.addColumn('users', 'blocked', {
+      type: DataTypes.BOOLEAN,
+      allowNull: false,
+      defaultValue: false,
+    });
+  }
+  if (!table.blockedReason) {
+    await qi.addColumn('users', 'blockedReason', {
+      type: DataTypes.STRING(255),
+      allowNull: true,
+    });
+  }
+  if (!table.blockedAt) {
+    await qi.addColumn('users', 'blockedAt', {
+      type: DataTypes.DATE,
+      allowNull: true,
+    });
+  }
+  try {
+    await sequelize.query(`ALTER TYPE "enum_users_role" ADD VALUE IF NOT EXISTS 'superadmin'`);
+  } catch {
+    /* enum may not exist if role is already VARCHAR */
+  }
+  try {
+    await sequelize.query(`ALTER TABLE users ALTER COLUMN role TYPE VARCHAR(20) USING role::text`);
+  } catch {
+    /* already VARCHAR or dialect mismatch */
+  }
+  await sequelize.query(
+    `UPDATE users SET plan = 'builder' WHERE role = 'user' AND (plan IS NULL OR plan = '')`
+  );
+}
 
 export default User;

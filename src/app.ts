@@ -7,6 +7,9 @@ import sequelize from './config/database';
 import { cleanupOrphanTables } from './config/cleanupDatabase';
 import { initFirebaseAdmin } from './config/firebase';
 import './models';
+import { ensureWalletColumns } from './models/Wallet';
+import { ensureUserPlanColumn } from './models/User';
+import { ensureIndicatorCategoryColumn } from './models/Indicator';
 import routes from './routes';
 import { swaggerSpec } from './config/swagger';
 import { metatraderService } from './integrations/metatrader/mt.service';
@@ -60,7 +63,11 @@ app.use((err: any, _req: express.Request, res: express.Response, next: express.N
   return next(err);
 });
 if (process.env.NODE_ENV !== 'production') {
-  app.use('/api/docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec, { persistAuthorization: true }));
+  app.use(
+    '/api/docs',
+    swaggerUi.serve,
+    swaggerUi.setup(swaggerSpec, { swaggerOptions: { persistAuthorization: true } }),
+  );
   app.get('/api/docs.json', (_req, res) => res.json(swaggerSpec));
 }
 app.use('/api', routes);
@@ -92,6 +99,9 @@ const start = async () => {
       await cleanupOrphanTables();
     }
     await syncDatabase();
+    await ensureWalletColumns();
+    await ensureUserPlanColumn();
+    await ensureIndicatorCategoryColumn();
     logger.info('Models synchronized');
     await ensureBootstrapAdmin();
     await ensureSystemControls();

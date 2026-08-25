@@ -3,13 +3,15 @@ import crypto from 'crypto';
 import bcrypt from 'bcrypt';
 import { Op } from 'sequelize';
 import { User } from '../models';
+import { bumpSessionVersion } from '../models/User';
 import { ApiResponse } from '../types';
-import { signToken } from '../utils/jwt';
+import { getAppUrl, isDevResetLinkEnabled, sendOrionPasswordResetEmail, sendOrionVerifyEmail } from '../utils/mailer';
+import { signToken, signEmailVerifyToken, verifyEmailVerifyToken } from '../utils/jwt';
 import { logger } from '../utils/logger';
 import { syncFirebasePassword, verifyFirebaseIdToken } from '../config/firebase';
 import { isPasswordStrong, PASSWORD_POLICY_MESSAGE } from '../utils/passwordPolicy';
-import { getAppUrl, isDevResetLinkEnabled, sendOrionPasswordResetEmail } from '../utils/mailer';
 import { roleForNewUser } from '../utils/roles';
+import { defaultPlanForRole, normalizePlan } from '../config/plans';
 
 function findUserByEmail(email: string) {
   return User.findOne({ where: { email: { [Op.iLike]: email.trim() } } });
@@ -26,11 +28,13 @@ function parseRegisterError(error: any): string {
 }
 
 function userToDTO(user: User) {
+  const plan = normalizePlan(user.role, user.plan);
   return {
     id: user.id,
     username: user.username,
     email: user.email,
     role: user.role,
+    plan,
     firstName: user.firstName || '',
     lastName: user.lastName || '',
     phone: user.phone || '',
@@ -46,9 +50,16 @@ function userToDTO(user: User) {
 }
 
 function issueSession(user: User, rememberMe?: boolean) {
-  const tokenExpiration = rememberMe ? '30d' : '7d';
+  const tokenExpiration = rememberMe ? '7d' : '8h';
   const token = signToken(
-    { id: user.id, username: user.username, email: user.email, role: user.role },
+    {
+      id: user.id,
+      username: user.username,
+      email: user.email,
+      role: user.role,
+      plan: normalizePlan(user.role, user.plan),
+      sv: user.sessionVersion || 0,
+    },
     tokenExpiration
   );
   return { ...userToDTO(user), token };
@@ -88,10 +99,11 @@ export const register = async (req: Request, res: Response) => {
       phone: phone?.trim() || null,
       termsAccepted: termsAccepted ?? true,
       role,
+      plan: defaultPlanForRole(role),
     });
 
     logger.info(`[auth] Nuevo usuario creado id=${user.id} email=${user.email} username=${user.username} role=${user.role}`);
-    response.data = issueSession(user, true);
+    response.data = issueSession(user, false);
     response.message = 'Cuenta creada correctamente';
     res.status(201).json(response);
   } catch (error: any) {
@@ -118,7 +130,7 @@ export const login = async (req: Request, res: Response) => {
     if (!user) {
       logger.warn(`[auth] Login fallido: no existe ${email.trim()}`);
       response.success = false;
-      response.error = 'El usuario no existe';
+      response.error = 'Correo o contraseña incorrectos';
       return res.status(401).json(response);
     }
 
@@ -126,8 +138,16 @@ export const login = async (req: Request, res: Response) => {
     if (!validPassword) {
       logger.warn(`[auth] Login fallido: contraseña incorrecta email=${user.email} id=${user.id}`);
       response.success = false;
-      response.error = 'Contraseña incorrecta';
+      response.error = 'Correo o contraseña incorrectos';
       return res.status(401).json(response);
+    }
+
+    if (user.blocked) {
+      response.success = false;
+      response.error = user.blockedReason
+        ? `Cuenta bloqueada: ${user.blockedReason}`
+        : 'Esta cuenta está bloqueada';
+      return res.status(403).json(response);
     }
 
     user.lastLoginAt = new Date();
@@ -171,7 +191,7 @@ export const loginWithGoogle = async (req: Request, res: Response) => {
 
     let user = await User.findOne({
       where: {
-        [Op.or]: [{ firebaseUid: decoded.uid }, { email }],
+        [Op.or]: [{ firebaseUid: decoded.uid }, { email: { [Op.iLike]: email } }],
       },
     });
 
@@ -189,6 +209,7 @@ export const loginWithGoogle = async (req: Request, res: Response) => {
         emailVerified: decoded.email_verified === true,
         lastLoginAt: new Date(),
         role,
+        plan: defaultPlanForRole(role),
       });
       logger.info(
         `[auth] Nuevo usuario creado vía Google id=${user.id} email=${user.email} username=${user.username} role=${user.role}`
@@ -208,6 +229,14 @@ export const loginWithGoogle = async (req: Request, res: Response) => {
       user.lastLoginAt = new Date();
       await user.save();
       logger.info(`[auth] Login Google (usuario existente) id=${user.id} email=${user.email}`);
+    }
+
+    if (user.blocked) {
+      response.success = false;
+      response.error = user.blockedReason
+        ? `Cuenta bloqueada: ${user.blockedReason}`
+        : 'Esta cuenta está bloqueada';
+      return res.status(403).json(response);
     }
 
     response.data = issueSession(user, rememberMe);
@@ -334,6 +363,7 @@ export const resetPassword = async (req: Request, res: Response) => {
     user.password = newPassword;
     user.resetPasswordToken = null;
     user.resetPasswordExpires = null;
+    bumpSessionVersion(user);
     await user.save();
 
     if (user.firebaseUid) {
@@ -382,6 +412,7 @@ export const resetPasswordFromFirebase = async (req: Request, res: Response) => 
     user.password = newPassword;
     user.resetPasswordToken = null;
     user.resetPasswordExpires = null;
+    bumpSessionVersion(user);
     await user.save();
 
     logger.info(`[auth] Contraseña restablecida vía Firebase id=${user.id} email=${user.email}`);
@@ -430,17 +461,38 @@ export const changePassword = async (req: Request, res: Response) => {
     }
 
     user.password = newPassword;
+    bumpSessionVersion(user);
     await user.save();
 
     if (user.firebaseUid) {
       await syncFirebasePassword(user.firebaseUid, newPassword);
     }
 
-    response.message = 'Contraseña modificada con éxito';
+    response.message = 'Contraseña modificada con éxito. Vuelve a iniciar sesión.';
     res.json(response);
   } catch {
     response.success = false;
     response.error = 'Error al modificar la contraseña';
+    res.status(400).json(response);
+  }
+};
+
+export const logout = async (req: Request, res: Response) => {
+  const response: ApiResponse = { success: true };
+  try {
+    const userId = (req as any).user?.id;
+    if (userId) {
+      const user = await User.findByPk(userId);
+      if (user) {
+        bumpSessionVersion(user);
+        await user.save();
+      }
+    }
+    response.message = 'Sesión cerrada';
+    res.json(response);
+  } catch {
+    response.success = false;
+    response.error = 'Error al cerrar sesión';
     res.status(400).json(response);
   }
 };
@@ -468,7 +520,11 @@ export const updateProfile = async (req: Request, res: Response) => {
     if (lastName !== undefined) user.lastName = lastName?.trim() || null;
     if (phone !== undefined) user.phone = phone?.trim() || null;
     if (country !== undefined) user.country = country?.trim() || 'Global';
-    if (language !== undefined) user.language = language?.trim() || 'es';
+    if (language !== undefined) {
+      const allowed = new Set(['es', 'en', 'pt', 'fr', 'de', 'it', 'zh', 'ja', 'ko', 'ar', 'ru']);
+      const lang = String(language).trim().toLowerCase();
+      user.language = allowed.has(lang) ? lang : 'es';
+    }
     if (timezone !== undefined) user.timezone = timezone?.trim() || 'UTC-5';
 
     await user.save();
@@ -479,6 +535,73 @@ export const updateProfile = async (req: Request, res: Response) => {
   } catch {
     response.success = false;
     response.error = 'Error al actualizar información del perfil';
+    res.status(400).json(response);
+  }
+};
+
+export const requestEmailVerification = async (req: Request, res: Response) => {
+  const response: ApiResponse = { success: true };
+  try {
+    const userId = (req as any).user?.id;
+    const user = userId ? await User.findByPk(userId) : null;
+    if (!user) {
+      response.success = false;
+      response.error = 'No autenticado';
+      return res.status(401).json(response);
+    }
+    if (user.emailVerified) {
+      response.message = 'Tu correo ya está validado';
+      response.data = userToDTO(user);
+      return res.json(response);
+    }
+
+    const token = signEmailVerifyToken(user.id, user.email);
+    const verifyUrl = `${getAppUrl()}/verify-email?token=${encodeURIComponent(token)}`;
+    const sent = await sendOrionVerifyEmail({ to: user.email, verifyUrl });
+
+    if (isDevResetLinkEnabled()) {
+      response.data = { verifyUrl, emailSent: sent };
+    } else {
+      response.data = { emailSent: sent };
+    }
+    response.message = sent
+      ? 'Te enviamos un correo para validar la cuenta'
+      : 'No se pudo enviar el correo. Usa el enlace de validación si aparece en pantalla.';
+    res.json(response);
+  } catch (error: any) {
+    logger.error(`[auth] Error al pedir validación: ${error.message || error}`);
+    response.success = false;
+    response.error = 'No se pudo pedir la validación del correo';
+    res.status(400).json(response);
+  }
+};
+
+export const confirmEmailVerification = async (req: Request, res: Response) => {
+  const response: ApiResponse = { success: true };
+  try {
+    const token = typeof req.body?.token === 'string' ? req.body.token : '';
+    const payload = verifyEmailVerifyToken(token);
+    if (!payload) {
+      response.success = false;
+      response.error = 'El enlace de validación es inválido o caducó';
+      return res.status(400).json(response);
+    }
+
+    const user = await User.findByPk(payload.id);
+    if (!user || user.email.toLowerCase() !== payload.email.toLowerCase()) {
+      response.success = false;
+      response.error = 'El enlace de validación no coincide con la cuenta';
+      return res.status(400).json(response);
+    }
+
+    user.emailVerified = true;
+    await user.save();
+    response.data = userToDTO(user);
+    response.message = 'Cuenta validada correctamente';
+    res.json(response);
+  } catch {
+    response.success = false;
+    response.error = 'No se pudo validar el correo';
     res.status(400).json(response);
   }
 };

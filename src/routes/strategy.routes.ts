@@ -8,10 +8,12 @@ import {
   deleteStrategy,
 } from '../controllers/strategy.controller';
 import { authMiddleware } from '../middlewares/auth.middleware';
+import { requireCapability } from '../middlewares/plan.middleware';
 
 const router = Router();
 
 router.use(authMiddleware);
+router.use(requireCapability('strategies_auto'));
 
 router.get('/', getStrategies);
 router.post('/', createStrategy);

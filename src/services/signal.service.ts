@@ -1,4 +1,5 @@
 import Signal from '../models/Signal';
+import { hasCapability } from '../config/plans';
 
 export class SignalService {
   async getUserSignals(userId: number, limit = 50, source?: string) {
@@ -10,8 +11,24 @@ export class SignalService {
       order: [['createdAt', 'DESC']],
       limit,
     });
+    return signals.map((s) => this.toPublic(s));
+  }
 
-    return signals.map((s) => ({
+  async getLucyFeed(limit = 50) {
+    const signals = await Signal.findAll({
+      where: { source: 'lucy' },
+      order: [['createdAt', 'DESC']],
+      limit,
+    });
+    return signals.map((s) => this.toPublic(s));
+  }
+
+  canReadLucyFeed(role: string, plan: string | null) {
+    return hasCapability(role, plan, 'lucy_signals');
+  }
+
+  private toPublic(s: Signal) {
+    return {
       id: s.id,
       strategyId: s.strategyId,
       userId: s.userId,
@@ -27,7 +44,7 @@ export class SignalService {
       lucyRunId: s.lucyRunId,
       decision: s.decision,
       createdAt: s.createdAt.toISOString(),
-    }));
+    };
   }
 }
 

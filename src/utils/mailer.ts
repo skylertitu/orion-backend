@@ -82,6 +82,45 @@ export async function sendOrionPasswordResetEmail(options: {
   }
 }
 
+export async function sendOrionVerifyEmail(options: { to: string; verifyUrl: string }): Promise<boolean> {
+  if (!isSmtpConfigured()) return false;
+
+  const from = process.env.SMTP_FROM || process.env.SMTP_USER!;
+  const port = Number(process.env.SMTP_PORT || 587);
+  const transporter = nodemailer.createTransport({
+    host: process.env.SMTP_HOST,
+    port,
+    secure: process.env.SMTP_SECURE === 'true' || port === 465,
+    auth: {
+      user: process.env.SMTP_USER,
+      pass: process.env.SMTP_PASS,
+    },
+  });
+
+  try {
+    await transporter.sendMail({
+      from: `"AutoTrade" <${from}>`,
+      to: options.to,
+      subject: 'Validar cuenta — AutoTrade',
+      text: `Confirma tu correo de AutoTrade con este enlace (válido 24 horas): ${options.verifyUrl}`,
+      html: `
+        <div style="font-family:sans-serif;max-width:480px;margin:0 auto;color:#111">
+          <h2>Validar cuenta</h2>
+          <p>Confirma que este correo es tuyo para validar tu cuenta de AutoTrade.</p>
+          <p><a href="${escapeHtml(options.verifyUrl)}" style="display:inline-block;background:#eab308;color:#111;padding:12px 18px;border-radius:8px;text-decoration:none;font-weight:700">Validar correo</a></p>
+          <p style="font-size:12px;color:#555">El enlace caduca en 24 horas.</p>
+        </div>
+      `,
+    });
+    logger.info(`[mail] Correo de validación enviado a ${options.to}`);
+    return true;
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    logger.error(`[mail] No se pudo enviar validación a ${options.to}: ${message}`);
+    return false;
+  }
+}
+
 export async function sendFirebasePasswordResetEmail(email: string): Promise<boolean> {
   const apiKey = process.env.FIREBASE_WEB_API_KEY;
   if (!apiKey) {

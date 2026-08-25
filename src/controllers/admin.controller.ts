@@ -1,10 +1,12 @@
 import { Request, Response } from 'express';
 import { User, Strategy, Signal } from '../models';
+import { bumpSessionVersion } from '../models/User';
 import { ApiResponse } from '../types';
 import { TokenPayload } from '../utils/jwt';
-import bcrypt from 'bcrypt';
 import { Op } from 'sequelize';
 import { routeParam } from '../utils/params';
+import { isStaffRole, isSuperAdminRole } from '../utils/roles';
+import { isUserPlan } from '../config/plans';
 
 type AuthRequest = Request & { user?: TokenPayload };
 
@@ -58,7 +60,7 @@ export const getAllUsers = async (req: Request, res: Response) => {
 
     const { rows: users, count } = await User.findAndCountAll({
       where,
-      attributes: ['id', 'username', 'email', 'role', 'balance', 'createdAt'],
+      attributes: ['id', 'username', 'email', 'role', 'plan', 'balance', 'blocked', 'blockedReason', 'lastLoginAt', 'createdAt'],
       order: [['createdAt', 'DESC']],
       limit,
       offset,
@@ -88,7 +90,7 @@ export const getUserById = async (req: Request, res: Response) => {
   const response: ApiResponse = { success: true };
   try {
     const user = await User.findByPk(routeParam(req.params.id), {
-      attributes: ['id', 'username', 'email', 'role', 'balance', 'createdAt', 'updatedAt'],
+      attributes: ['id', 'username', 'email', 'role', 'plan', 'balance', 'createdAt', 'updatedAt'],
     });
     if (!user) {
       response.success = false;
@@ -117,20 +119,49 @@ export const updateUser = async (req: AuthRequest, res: Response) => {
       return res.status(404).json(response);
     }
 
-    const { username, email, role, balance, password } = req.body;
+    const { username, email, role, balance, password, plan } = req.body;
+
+    if (role !== undefined || password || balance !== undefined || username !== undefined || email !== undefined) {
+      if (!isSuperAdminRole(req.user?.role)) {
+        response.success = false;
+        response.error = 'Solo superadmin puede editar datos de usuario en la base';
+        return res.status(403).json(response);
+      }
+    }
+
+    if (isSuperAdminRole(user.role) && !isSuperAdminRole(req.user?.role)) {
+      response.success = false;
+      response.error = 'Un admin no puede modificar a un superadmin';
+      return res.status(403).json(response);
+    }
 
     // Prevent admin from removing their own admin role
-    if (req.user?.id === user.id && role && role !== 'admin') {
+    if (req.user?.id === user.id && role && !isStaffRole(role)) {
       response.success = false;
       response.error = 'No puedes quitarte tu propio rol de administrador';
       return res.status(400).json(response);
     }
 
+    const roleChanged = role !== undefined && role !== user.role;
+    const passwordChanged = Boolean(password);
+
     if (username !== undefined) user.username = username;
     if (email !== undefined) user.email = email;
     if (role !== undefined) user.role = role;
+    if (plan !== undefined) {
+      if (isStaffRole(user.role)) {
+        user.plan = null;
+      } else if (!isUserPlan(plan)) {
+        response.success = false;
+        response.error = 'Plan inválido. Usa analyst, signals o builder';
+        return res.status(400).json(response);
+      } else {
+        user.plan = plan;
+      }
+    }
     if (balance !== undefined) user.balance = balance;
-    if (password) user.password = await bcrypt.hash(password, 10);
+    if (password) user.password = password;
+    if (roleChanged || passwordChanged) bumpSessionVersion(user);
 
     await user.save();
     response.data = {
@@ -138,6 +169,7 @@ export const updateUser = async (req: AuthRequest, res: Response) => {
       username: user.username,
       email: user.email,
       role: user.role,
+      plan: user.plan,
       balance: user.balance,
     };
     response.message = 'Usuario actualizado correctamente';
@@ -155,6 +187,11 @@ export const updateUser = async (req: AuthRequest, res: Response) => {
 export const deleteUser = async (req: AuthRequest, res: Response) => {
   const response: ApiResponse = { success: true };
   try {
+    if (!isSuperAdminRole(req.user?.role)) {
+      response.success = false;
+      response.error = 'Solo superadmin puede eliminar usuarios';
+      return res.status(403).json(response);
+    }
     if (req.user?.id === parseInt(routeParam(req.params.id), 10)) {
       response.success = false;
       response.error = 'No puedes eliminar tu propia cuenta de administrador';
@@ -181,19 +218,31 @@ export const deleteUser = async (req: AuthRequest, res: Response) => {
 // ─────────────────────────────────────────────
 // POST /api/admin/users/:id/promote
 // ─────────────────────────────────────────────
-export const promoteToAdmin = async (req: Request, res: Response) => {
+export const promoteToAdmin = async (req: AuthRequest, res: Response) => {
   const response: ApiResponse = { success: true };
   try {
+    if (!isSuperAdminRole(req.user?.role)) {
+      response.success = false;
+      response.error = 'Solo superadmin puede promover administradores';
+      return res.status(403).json(response);
+    }
     const user = await User.findByPk(routeParam(req.params.id));
     if (!user) {
       response.success = false;
       response.error = 'Usuario no encontrado';
       return res.status(404).json(response);
     }
+    if (isSuperAdminRole(user.role)) {
+      response.success = false;
+      response.error = 'Un superadmin no se cambia por esta vía. Usa el panel Superadmin';
+      return res.status(400).json(response);
+    }
     user.role = 'admin';
+    user.plan = null;
+    bumpSessionVersion(user);
     await user.save();
     response.message = `${user.username} ahora es administrador`;
-    response.data = { id: user.id, username: user.username, role: user.role };
+    response.data = { id: user.id, username: user.username, role: user.role, plan: user.plan };
     res.json(response);
   } catch (error: any) {
     response.success = false;
@@ -208,6 +257,11 @@ export const promoteToAdmin = async (req: Request, res: Response) => {
 export const demoteToUser = async (req: AuthRequest, res: Response) => {
   const response: ApiResponse = { success: true };
   try {
+    if (!isSuperAdminRole(req.user?.role)) {
+      response.success = false;
+      response.error = 'Solo superadmin puede quitar el rol de administrador';
+      return res.status(403).json(response);
+    }
     if (req.user?.id === parseInt(routeParam(req.params.id), 10)) {
       response.success = false;
       response.error = 'No puedes degradar tu propia cuenta';
@@ -219,14 +273,53 @@ export const demoteToUser = async (req: AuthRequest, res: Response) => {
       response.error = 'Usuario no encontrado';
       return res.status(404).json(response);
     }
+    if (isSuperAdminRole(user.role)) {
+      response.success = false;
+      response.error = 'Un superadmin no se degrada por esta vía. Usa el panel Superadmin';
+      return res.status(400).json(response);
+    }
     user.role = 'user';
+    if (!user.plan) user.plan = 'builder';
+    bumpSessionVersion(user);
     await user.save();
     response.message = `${user.username} ahora es usuario regular`;
-    response.data = { id: user.id, username: user.username, role: user.role };
+    response.data = { id: user.id, username: user.username, role: user.role, plan: user.plan };
     res.json(response);
   } catch (error: any) {
     response.success = false;
     response.error = error.message;
+    res.status(500).json(response);
+  }
+};
+
+export const setUserPlan = async (req: AuthRequest, res: Response) => {
+  const response: ApiResponse = { success: true };
+  try {
+    const user = await User.findByPk(routeParam(req.params.id));
+    if (!user) {
+      response.success = false;
+      response.error = 'Usuario no encontrado';
+      return res.status(404).json(response);
+    }
+    if (isStaffRole(user.role)) {
+      response.success = false;
+      response.error = 'Admin y superadmin no usan plan de usuario.';
+      return res.status(400).json(response);
+    }
+    const plan = req.body?.plan;
+    if (!isUserPlan(plan)) {
+      response.success = false;
+      response.error = 'Plan inválido. Usa analyst, signals o builder';
+      return res.status(400).json(response);
+    }
+    user.plan = plan;
+    await user.save();
+    response.message = `${user.username} ahora es plan ${plan}`;
+    response.data = { id: user.id, username: user.username, role: user.role, plan: user.plan };
+    res.json(response);
+  } catch (error: any) {
+    response.success = false;
+    response.error = error.message || 'Error al asignar plan';
     res.status(500).json(response);
   }
 };

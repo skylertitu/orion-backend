@@ -101,6 +101,9 @@ export class BrokerAccountService {
 
   async createAccount(input: CreateBrokerAccountInput): Promise<BrokerAccountPublicView> {
     assertBrokerId(input.brokerId);
+    if (input.brokerId === 'mt5' && process.env.MT_ENABLED !== 'true') {
+      throw new Error('MetaTrader no está activo. Solo puedes conectar brokers en funcionamiento.');
+    }
     if (input.isPrimary) await clearPrimaryForUser(input.userId, input.brokerId);
 
     const account = await BrokerAccount.create({
