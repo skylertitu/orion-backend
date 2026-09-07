@@ -14,7 +14,8 @@ services:
       - path: .env
         required: false
     environment:
-      NODE_ENV: production
+      # development en Docker local (evita exigir ENCRYPTION_KEY como en Render)
+      NODE_ENV: development
       PORT: "3008"
       # MT5/ZeroMQ no se usa dentro del contenedor por defecto
       MT_ENABLED: "${MT_ENABLED:-false}"
@@ -23,4 +24,6 @@ services:
       CORS_ORIGIN: "${CORS_ORIGIN:-http://localhost:3000}"
       APP_URL: "${APP_URL:-http://localhost:3000}"
       DB_SYNC: "${DB_SYNC:-safe}"
+      # Si falta en .env, valor solo para práctica local (cámbialo en producción)
+      ENCRYPTION_KEY: "${ENCRYPTION_KEY:-orion-docker-local-encryption-key-32b}"
     restart: unless-stopped
