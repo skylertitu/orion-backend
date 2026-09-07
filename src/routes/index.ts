@@ -16,7 +16,10 @@ import walletRoutes from './wallet.routes';
 import marketRoutes from './market.routes';
 import indicatorRoutes from './indicator.routes';
 import jupiterRoutes from './jupiter.routes';
+import researchRoutes from './research.routes';
+import billingRoutes from './billing.routes';
 import { getSystemOverview } from '../controllers/system.controller';
+import { ccxtStatus } from '../engine/ccxt/ccxtConfig';
 
 const router = Router();
 
@@ -42,8 +45,11 @@ router.get('/health', async (_req, res) => {
       lucy: {
         pending: LUCY_INTEGRATION.pending,
         enabled: LUCY_INTEGRATION.enabled,
+        mode: LUCY_INTEGRATION.mode,
+        autoTrade: LUCY_INTEGRATION.autoTrade,
         reason: LUCY_INTEGRATION.reason,
       },
+      ccxt: ccxtStatus(),
     },
   });
 });
@@ -61,6 +67,8 @@ router.use('/signals', signalRoutes);
 router.use('/wallets', walletRoutes);
 router.use('/indicators', indicatorRoutes);
 router.use('/jupiter', jupiterRoutes);
+router.use('/research', researchRoutes);
+router.use('/billing', billingRoutes);
 router.get('/system/status', getSystemOverview);
 
 export default router;

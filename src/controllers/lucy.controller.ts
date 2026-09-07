@@ -55,12 +55,26 @@ export const getSignals = async (req: Request, res: Response) => {
 export const health = async (_req: Request, res: Response) => {
   const response: ApiResponse = { success: true };
   if (LUCY_INTEGRATION.pending) {
-    response.data = { alive: false, ...pendingPayload() };
+    response.data = {
+      alive: false,
+      pending: true,
+      enabled: false,
+      mode: LUCY_INTEGRATION.mode,
+      autoTrade: LUCY_INTEGRATION.autoTrade,
+      reason: LUCY_INTEGRATION.reason,
+    };
     return res.json(response);
   }
   try {
     const alive = await lucyService.healthCheck();
-    response.data = { alive };
+    response.data = {
+      alive,
+      pending: false,
+      enabled: LUCY_INTEGRATION.enabled,
+      mode: LUCY_INTEGRATION.mode,
+      autoTrade: LUCY_INTEGRATION.autoTrade,
+      reason: LUCY_INTEGRATION.reason,
+    };
     res.json(response);
   } catch {
     response.success = false;

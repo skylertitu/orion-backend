@@ -15,6 +15,7 @@ import { adminLimiter } from '../middlewares/rateLimiter';
 import { getSystemOverview, toggleSystemModule } from '../controllers/system.controller';
 import { saveJupiterKey, jupiterStatus } from '../controllers/jupiter.controller';
 import { getRisk, saveRisk, pauseRisk, resumeRisk } from '../controllers/risk.controller';
+import { fulfillPlanRequest, listPlanRequests } from '../controllers/billing.controller';
 
 const router = Router();
 
@@ -38,5 +39,7 @@ router.delete('/users/:id', deleteUser);
 router.post('/users/:id/promote', promoteToAdmin);
 router.post('/users/:id/demote', demoteToUser);
 router.post('/users/:id/plan', setUserPlan);
+router.get('/plan-requests', listPlanRequests);
+router.post('/plan-requests/:id/fulfill', fulfillPlanRequest);
 
 export default router;

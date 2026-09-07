@@ -3,6 +3,7 @@ allowBuilds:
   '@scarf/scarf': true
   bcrypt: true
   bufferutil: true
+  ccxt: true
   esbuild: false
   protobufjs: true
   unrs-resolver: false

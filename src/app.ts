@@ -24,6 +24,7 @@ import { ensureBootstrapAdmin } from './utils/roles';
 import { ensureSystemControls, isModuleEnabled } from './services/systemControl.service';
 import { ensureRiskSettings, isPausedByRiskSync } from './services/risk.service';
 import { setupMarketWs } from './routes/marketWs';
+import { stripeWebhook } from './controllers/billing.controller';
 
 const app = express();
 const PORT = process.env.PORT || 3008;
@@ -58,6 +59,10 @@ app.use((req, res, next) => {
   });
   next();
 });
+
+// Stripe webhook needs raw body (before express.json)
+app.post('/api/billing/webhook', express.raw({ type: 'application/json' }), stripeWebhook);
+
 app.use(express.json({ limit: '400kb' }));
 app.use((err: any, _req: express.Request, res: express.Response, next: express.NextFunction) => {
   if (err instanceof SyntaxError && 'body' in err) {

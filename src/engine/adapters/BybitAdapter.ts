@@ -1,10 +1,20 @@
 // ============================================================
-// BybitAdapter - Adaptador para Bybit (Spot / Linear)
+// BybitAdapter - Bybit Spot / Linear (CCXT primary, legacy fallback)
 // ============================================================
 import { createHmac } from 'crypto';
+import type { Exchange } from 'ccxt';
 import { IBrokerAdapter } from '../IBrokerAdapter';
 import { BrokerId, BrokerPosition, OrderResult, UnifiedOrder } from '../engine.types';
 import { BrokerAccountType, BrokerEnvironment } from '../../types';
+import { isCcxtEnabled } from '../ccxt/ccxtConfig';
+import { createCcxtExchange } from '../ccxt/ccxtFactory';
+import {
+  ccxtClosePosition,
+  ccxtFetchPrice,
+  ccxtListPositions,
+  ccxtMarketOrder,
+  ccxtPing,
+} from '../ccxt/ccxtOps';
 
 export interface BybitAdapterOptions {
   apiKey?: string;
@@ -23,10 +33,15 @@ export class BybitAdapter implements IBrokerAdapter {
   private apiSecret: string;
   private baseUrl: string;
   private category: BybitCategory;
+  private readonly environment?: BrokerEnvironment;
+  private readonly accountType?: BrokerAccountType;
+  private exchange: Exchange | null = null;
 
   constructor(options: BybitAdapterOptions = {}) {
     this.apiKey = options.apiKey || process.env.BYBIT_API_KEY || '';
     this.apiSecret = options.apiSecret || process.env.BYBIT_API_SECRET || '';
+    this.environment = options.environment;
+    this.accountType = options.accountType;
     this.baseUrl =
       options.environment === 'testnet'
         ? 'https://api-testnet.bybit.com'
@@ -34,8 +49,27 @@ export class BybitAdapter implements IBrokerAdapter {
     this.category = options.accountType === 'futures' ? 'linear' : 'spot';
   }
 
+  private getExchange(): Exchange {
+    if (!this.exchange) {
+      this.exchange = createCcxtExchange('bybit', {
+        apiKey: this.apiKey,
+        secret: this.apiSecret,
+        environment: this.environment,
+        accountType: this.accountType,
+      });
+    }
+    return this.exchange;
+  }
+
   async isConnected(): Promise<boolean> {
-    await this.getPrice('BTCUSDT');
+    if (isCcxtEnabled()) {
+      try {
+        return await ccxtPing(this.getExchange(), Boolean(this.apiKey && this.apiSecret));
+      } catch {
+        /* legacy fallback */
+      }
+    }
+    await this.getPriceLegacy('BTCUSDT');
     if (!this.apiKey || !this.apiSecret) return true;
     const data = await this.privateGet('/v5/account/wallet-balance', {
       accountType: 'UNIFIED',
@@ -47,6 +81,17 @@ export class BybitAdapter implements IBrokerAdapter {
   }
 
   async getPrice(symbol: string): Promise<number> {
+    if (isCcxtEnabled()) {
+      try {
+        return await ccxtFetchPrice(this.getExchange(), symbol);
+      } catch {
+        /* legacy fallback */
+      }
+    }
+    return this.getPriceLegacy(symbol);
+  }
+
+  private async getPriceLegacy(symbol: string): Promise<number> {
     const normalized = symbol.toUpperCase();
     const data = await this.publicGet(
       `/v5/market/tickers?category=${this.category}&symbol=${normalized}`
@@ -90,6 +135,20 @@ export class BybitAdapter implements IBrokerAdapter {
         side: order.side,
         error: 'Sin credenciales Bybit. Conecta una cuenta o activa PAPER_TRADING=true.',
       };
+    }
+
+    if (isCcxtEnabled()) {
+      try {
+        return await ccxtMarketOrder(this.getExchange(), this.brokerId, order);
+      } catch (err: any) {
+        return {
+          success: false,
+          broker: this.brokerId,
+          symbol,
+          side: order.side,
+          error: err.message || 'Error ejecutando orden en Bybit (CCXT)',
+        };
+      }
     }
 
     try {
@@ -141,6 +200,14 @@ export class BybitAdapter implements IBrokerAdapter {
 
   async getPositions(): Promise<BrokerPosition[]> {
     if (!this.apiKey || !this.apiSecret) return [];
+
+    if (isCcxtEnabled()) {
+      try {
+        return await ccxtListPositions(this.getExchange(), this.brokerId);
+      } catch {
+        /* legacy fallback */
+      }
+    }
 
     try {
       if (this.category === 'linear') {
@@ -210,6 +277,21 @@ export class BybitAdapter implements IBrokerAdapter {
         side: 'sell',
         error: 'Credenciales Bybit no configuradas',
       };
+    }
+
+    if (isCcxtEnabled()) {
+      try {
+        return await ccxtClosePosition(this.getExchange(), this.brokerId, ticket);
+      } catch (err: any) {
+        return {
+          success: false,
+          broker: this.brokerId,
+          symbol: '',
+          side: 'sell',
+          ticket,
+          error: err.message || 'Error al cerrar posición en Bybit (CCXT)',
+        };
+      }
     }
 
     if (this.category !== 'linear') {
@@ -282,7 +364,7 @@ export class BybitAdapter implements IBrokerAdapter {
 
   private bybitHttpError(status: number, body: string): Error {
     const text = body.replace(/\s+/g, ' ').trim();
-    if (status === 403 && /block access from your country/i.test(text)) {
+    if (status === 403 && /cloud access from your country/i.test(text)) {
       return new Error(
         'Bybit bloquea este país (CloudFront 403). api.bybit.com no acepta este servidor; Binance sí.'
       );

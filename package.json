@@ -12,7 +12,8 @@
     "start:dev": "tsx src/app.ts",
     "build": "tsc",
     "lint": "tsc --noEmit",
-    "test": "jest --passWithNoTests"
+    "test": "jest --passWithNoTests",
+    "lucy:stub": "tsx src/integrations/lucy/lucy.stub.server.ts"
   },
   "keywords": [],
   "author": "",
@@ -22,6 +23,7 @@
     "@solana/web3.js": "^1.98.4",
     "bcrypt": "^6.0.0",
     "bs58": "^6.0.0",
+    "ccxt": "4.4.82",
     "cors": "^2.8.5",
     "dotenv": "^16.4.7",
     "express": "^4.21.2",
@@ -33,6 +35,7 @@
     "pg": "^8.13.1",
     "pg-hstore": "^2.3.4",
     "sequelize": "^6.37.5",
+    "stripe": "^17.7.0",
     "swagger-jsdoc": "^6.3.0",
     "swagger-ui-express": "^5.0.1",
     "tweetnacl": "^1.0.3",

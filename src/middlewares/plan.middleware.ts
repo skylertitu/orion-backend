@@ -47,3 +47,30 @@ export function requireCapability(capability: PlanCapability) {
     }
   };
 }
+
+/** Pasa si el usuario tiene al menos una de las capacidades. */
+export function requireAnyCapability(...capabilities: PlanCapability[]) {
+  return async (req: Request, res: Response, next: NextFunction) => {
+    const response: ApiResponse = { success: false };
+    try {
+      const access = await loadAccess(req);
+      if (!access) {
+        response.error = 'No autenticado';
+        return res.status(401).json(response);
+      }
+      const ok = capabilities.some((capability) =>
+        hasCapability(access.role, access.plan, capability)
+      );
+      if (!ok) {
+        const primary = capabilities[0];
+        response.error = CAPABILITY_DENIED[primary] || 'Tu plan no incluye esta función';
+        response.data = { capabilities, plan: access.plan, role: access.role };
+        return res.status(403).json(response);
+      }
+      return next();
+    } catch {
+      response.error = 'Error al verificar el plan';
+      return res.status(500).json(response);
+    }
+  };
+}

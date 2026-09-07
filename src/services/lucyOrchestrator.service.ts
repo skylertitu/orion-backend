@@ -152,6 +152,7 @@ export class LucyOrchestrator {
 
   shouldAutoExecute(config: StrategyConfig, result: LucyPipelineResult): boolean {
     if (LUCY_INTEGRATION.pending) return false;
+    if (!LUCY_INTEGRATION.autoTrade) return false;
     if (!config.autoExecute) return false;
     const min = config.minConfidence ?? 0.6;
     if (result.action === 'hold') return false;

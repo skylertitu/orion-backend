@@ -1,10 +1,20 @@
 // ============================================================
-// BinanceAdapter - Adaptador para Binance Spot
+// BinanceAdapter - Binance Spot (CCXT primary, legacy HTTP fallback)
 // ============================================================
+import type { Exchange } from 'ccxt';
 import { IBrokerAdapter } from '../IBrokerAdapter';
 import { BrokerId, BrokerPosition, OrderResult, UnifiedOrder } from '../engine.types';
 import { binanceService } from '../../services/binance.service';
 import { BrokerEnvironment } from '../../types';
+import { isCcxtEnabled } from '../ccxt/ccxtConfig';
+import { createCcxtExchange } from '../ccxt/ccxtFactory';
+import {
+  ccxtClosePosition,
+  ccxtFetchPrice,
+  ccxtListPositions,
+  ccxtMarketOrder,
+  ccxtPing,
+} from '../ccxt/ccxtOps';
 
 export interface BinanceAdapterOptions {
   apiKey?: string;
@@ -19,11 +29,14 @@ export class BinanceAdapter implements IBrokerAdapter {
   private apiKey: string;
   private apiSecret: string;
   private readonly baseUrl: string;
+  private readonly environment?: BrokerEnvironment;
+  private exchange: Exchange | null = null;
 
   constructor(apiKeyOrOptions: string | BinanceAdapterOptions = '', apiSecret = '') {
     if (typeof apiKeyOrOptions === 'object') {
       this.apiKey = apiKeyOrOptions.apiKey || process.env.BINANCE_API_KEY || '';
       this.apiSecret = apiKeyOrOptions.apiSecret || process.env.BINANCE_API_SECRET || '';
+      this.environment = apiKeyOrOptions.environment;
       this.baseUrl =
         apiKeyOrOptions.environment === 'testnet'
           ? 'https://testnet.binance.vision'
@@ -35,7 +48,25 @@ export class BinanceAdapter implements IBrokerAdapter {
     }
   }
 
+  private getExchange(): Exchange {
+    if (!this.exchange) {
+      this.exchange = createCcxtExchange('binance', {
+        apiKey: this.apiKey,
+        secret: this.apiSecret,
+        environment: this.environment,
+      });
+    }
+    return this.exchange;
+  }
+
   async isConnected(): Promise<boolean> {
+    if (isCcxtEnabled()) {
+      try {
+        return await ccxtPing(this.getExchange(), Boolean(this.apiKey && this.apiSecret));
+      } catch {
+        /* legacy fallback */
+      }
+    }
     try {
       if (this.apiKey && this.apiSecret) {
         const timestamp = Date.now();
@@ -54,6 +85,13 @@ export class BinanceAdapter implements IBrokerAdapter {
   }
 
   async getPrice(symbol: string): Promise<number> {
+    if (isCcxtEnabled()) {
+      try {
+        return await ccxtFetchPrice(this.getExchange(), symbol);
+      } catch {
+        /* legacy fallback */
+      }
+    }
     if (this.baseUrl.includes('testnet')) {
       const normalized = symbol.toUpperCase();
       const res = await fetch(`${this.baseUrl}/api/v3/ticker/price?symbol=${normalized}`);
@@ -71,6 +109,14 @@ export class BinanceAdapter implements IBrokerAdapter {
 
   async getPositions(): Promise<BrokerPosition[]> {
     if (!this.apiKey) return [];
+
+    if (isCcxtEnabled() && this.apiSecret) {
+      try {
+        return await ccxtListPositions(this.getExchange(), this.brokerId);
+      } catch {
+        /* legacy fallback */
+      }
+    }
 
     try {
       const timestamp = Date.now();
@@ -120,6 +166,21 @@ export class BinanceAdapter implements IBrokerAdapter {
         side: 'sell',
         error: 'Sin credenciales Binance para cerrar la posición',
       };
+    }
+
+    if (isCcxtEnabled()) {
+      try {
+        return await ccxtClosePosition(this.getExchange(), this.brokerId, ticket);
+      } catch (err: any) {
+        return {
+          success: false,
+          broker: this.brokerId,
+          ticket,
+          symbol: '',
+          side: 'sell',
+          error: err.message || 'Error al cerrar en Binance (CCXT)',
+        };
+      }
     }
 
     try {
@@ -190,6 +251,20 @@ export class BinanceAdapter implements IBrokerAdapter {
         side: side.toLowerCase() as 'buy' | 'sell',
         error: 'Sin credenciales Binance. Conecta una cuenta o activa PAPER_TRADING=true.',
       };
+    }
+
+    if (isCcxtEnabled()) {
+      try {
+        return await ccxtMarketOrder(this.getExchange(), this.brokerId, order);
+      } catch (err: any) {
+        return {
+          success: false,
+          broker: this.brokerId,
+          symbol,
+          side: side.toLowerCase() as 'buy' | 'sell',
+          error: err.message || 'Error en Binance (CCXT)',
+        };
+      }
     }
 
     try {
