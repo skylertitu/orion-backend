@@ -1,0 +1,26 @@
+# Solo backend API. No reemplaza Render ni `pnpm dev` local.
+# Uso: docker compose up --build
+#
+# Variables: copia .env.example → .env (o pásalas en environment).
+# DATABASE_URL puede seguir siendo Neon/Render (recomendado) o un Postgres local.
+
+services:
+  api:
+    build: .
+    container_name: orion-api
+    ports:
+      - "${ORION_API_PORT:-3008}:3008"
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      NODE_ENV: production
+      PORT: "3008"
+      # MT5/ZeroMQ no se usa dentro del contenedor por defecto
+      MT_ENABLED: "${MT_ENABLED:-false}"
+      CCXT_ENABLED: "${CCXT_ENABLED:-true}"
+      LUCY_MODE: "${LUCY_MODE:-off}"
+      CORS_ORIGIN: "${CORS_ORIGIN:-http://localhost:3000}"
+      APP_URL: "${APP_URL:-http://localhost:3000}"
+      DB_SYNC: "${DB_SYNC:-safe}"
+    restart: unless-stopped
