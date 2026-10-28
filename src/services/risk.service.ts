@@ -94,16 +94,15 @@ export async function updateRiskLimits(patch: Partial<RiskLimits>, updatedBy?: n
   return next;
 }
 
-async function realizedDailyPnlUsd(): Promise<number> {
-  const closed = await Trade.findAll({
-    where: {
-      status: 'closed',
-      strategyId: { [Op.not]: null },
-      closedAt: { [Op.gte]: startOfUtcDay() },
-    },
-  });
+export function calculateRealizedDailyPnl(
+  trades: Array<{
+    quantity?: number | string | null;
+    entryPrice?: number | string | null;
+    pnlPct?: number | string | null;
+  }>
+): number {
   let pnl = 0;
-  for (const trade of closed) {
+  for (const trade of trades) {
     const qty = Number(trade.quantity) || 0;
     const entry = Number(trade.entryPrice) || 0;
     const pct = Number(trade.pnlPct) || 0;
@@ -112,18 +111,43 @@ async function realizedDailyPnlUsd(): Promise<number> {
   return pnl;
 }
 
-async function openWorkerPositions(): Promise<number> {
-  return Trade.count({
-    where: {
-      status: 'open',
-      strategyId: { [Op.not]: null },
-    },
-  });
+export async function realizedDailyPnlUsd(userId?: number, brokerAccountId?: number): Promise<number> {
+  const where: any = {
+    status: 'closed',
+    strategyId: { [Op.not]: null },
+    closedAt: { [Op.gte]: startOfUtcDay() },
+  };
+  if (userId != null) {
+    where.userId = userId;
+  }
+  if (brokerAccountId != null) {
+    where.brokerAccountId = brokerAccountId;
+  }
+  const closed = await Trade.findAll({ where });
+  return calculateRealizedDailyPnl(closed);
 }
 
-export async function getRiskSnapshot(): Promise<RiskSnapshot> {
-  const row = await ensureRiskSettings();
-  const [dailyPnlUsd, openPositions] = await Promise.all([realizedDailyPnlUsd(), openWorkerPositions()]);
+export async function openWorkerPositions(userId?: number, brokerAccountId?: number): Promise<number> {
+  const where: any = {
+    status: 'open',
+    strategyId: { [Op.not]: null },
+  };
+  if (userId != null) {
+    where.userId = userId;
+  }
+  if (brokerAccountId != null) {
+    where.brokerAccountId = brokerAccountId;
+  }
+  return Trade.count({ where });
+}
+
+export async function getRiskSnapshot(userId?: number): Promise<RiskSnapshot> {
+  const targetId = userId != null ? `user_${userId}` : RISK_SETTINGS_ID;
+  const row = (await RiskSettings.findByPk(targetId)) || (await ensureRiskSettings());
+  const [dailyPnlUsd, openPositions] = await Promise.all([
+    realizedDailyPnlUsd(userId),
+    openWorkerPositions(userId),
+  ]);
   return {
     limits: toLimits(row),
     pausedByRisk: Boolean(row.pausedByRisk),
@@ -167,35 +191,120 @@ export async function resumeFromRisk(updatedBy?: number): Promise<void> {
   workerLogger.info('Pausa de riesgo levantada');
 }
 
+export function evaluateCanOpen(
+  limits: RiskLimits,
+  current: {
+    pausedByRisk: boolean;
+    pauseReason?: string | null;
+    dailyPnlUsd: number;
+    openPositions: number;
+  },
+  input: {
+    notionalUsd: number;
+    symbol?: string;
+    strategyId?: number;
+  }
+): { ok: true } | { ok: false; reason: string } {
+  if (current.pausedByRisk) {
+    return { ok: false, reason: current.pauseReason || 'Worker pausado por riesgo' };
+  }
+
+  if (limits.maxDailyLossUsd > 0 && current.dailyPnlUsd <= -limits.maxDailyLossUsd) {
+    return {
+      ok: false,
+      reason: `Pérdida diaria ${current.dailyPnlUsd.toFixed(2)} USD supera el máximo de ${limits.maxDailyLossUsd} USD`,
+    };
+  }
+
+  if (limits.maxOpenPositions > 0 && current.openPositions >= limits.maxOpenPositions) {
+    return {
+      ok: false,
+      reason: `Hay ${current.openPositions} posiciones abiertas (máximo ${limits.maxOpenPositions})`,
+    };
+  }
+
+  if (limits.maxOrderUsd > 0 && input.notionalUsd > limits.maxOrderUsd) {
+    return {
+      ok: false,
+      reason: `Orden de ${input.notionalUsd.toFixed(2)} USD supera el tope de ${limits.maxOrderUsd} USD`,
+    };
+  }
+
+  return { ok: true };
+}
+
 export async function assertCanOpen(input: {
   notionalUsd: number;
   symbol?: string;
   strategyId?: number;
+  userId?: number;
+  brokerAccountId?: number;
 }): Promise<{ ok: true } | { ok: false; reason: string }> {
-  const row = await ensureRiskSettings();
-  if (row.pausedByRisk) {
-    return { ok: false, reason: row.pauseReason || 'Worker pausado por riesgo' };
+  const globalRow = await ensureRiskSettings();
+  if (globalRow.pausedByRisk) {
+    return { ok: false, reason: globalRow.pauseReason || 'Sistema pausado por riesgo global' };
   }
 
-  const limits = toLimits(row);
-  const [dailyPnlUsd, openPositions] = await Promise.all([realizedDailyPnlUsd(), openWorkerPositions()]);
+  // 1. Verificación por usuario
+  if (input.userId != null) {
+    const userRow = await RiskSettings.findByPk(`user_${input.userId}`);
+    if (userRow?.pausedByRisk) {
+      return { ok: false, reason: userRow.pauseReason || `Trading pausado por riesgo para el usuario #${input.userId}` };
+    }
+    const userLimits = userRow ? toLimits(userRow) : toLimits(globalRow);
+    const [userDailyPnl, userOpenPositions] = await Promise.all([
+      realizedDailyPnlUsd(input.userId, input.brokerAccountId),
+      openWorkerPositions(input.userId, input.brokerAccountId),
+    ]);
 
-  if (limits.maxDailyLossUsd > 0 && dailyPnlUsd <= -limits.maxDailyLossUsd) {
-    const reason = `Pérdida diaria ${dailyPnlUsd.toFixed(2)} USD supera el máximo de ${limits.maxDailyLossUsd} USD`;
-    lastReject = { at: new Date().toISOString(), reason, symbol: input.symbol, strategyId: input.strategyId };
-    return { ok: false, reason };
+    const userEval = evaluateCanOpen(
+      userLimits,
+      {
+        pausedByRisk: Boolean(userRow?.pausedByRisk),
+        pauseReason: userRow?.pauseReason,
+        dailyPnlUsd: userDailyPnl,
+        openPositions: userOpenPositions,
+      },
+      input
+    );
+
+    if (!userEval.ok) {
+      lastReject = {
+        at: new Date().toISOString(),
+        reason: `[Usuario #${input.userId}] ${userEval.reason}`,
+        symbol: input.symbol,
+        strategyId: input.strategyId,
+      };
+      return userEval;
+    }
   }
 
-  if (limits.maxOpenPositions > 0 && openPositions >= limits.maxOpenPositions) {
-    const reason = `Hay ${openPositions} posiciones abiertas (máximo ${limits.maxOpenPositions})`;
-    lastReject = { at: new Date().toISOString(), reason, symbol: input.symbol, strategyId: input.strategyId };
-    return { ok: false, reason };
-  }
+  // 2. Verificación global del sistema
+  const globalLimits = toLimits(globalRow);
+  const [globalDailyPnl, globalOpenPositions] = await Promise.all([
+    realizedDailyPnlUsd(),
+    openWorkerPositions(),
+  ]);
 
-  if (limits.maxOrderUsd > 0 && input.notionalUsd > limits.maxOrderUsd) {
-    const reason = `Orden de ${input.notionalUsd.toFixed(2)} USD supera el tope de ${limits.maxOrderUsd} USD`;
-    lastReject = { at: new Date().toISOString(), reason, symbol: input.symbol, strategyId: input.strategyId };
-    return { ok: false, reason };
+  const globalEval = evaluateCanOpen(
+    globalLimits,
+    {
+      pausedByRisk: Boolean(globalRow.pausedByRisk),
+      pauseReason: globalRow.pauseReason,
+      dailyPnlUsd: globalDailyPnl,
+      openPositions: globalOpenPositions,
+    },
+    input
+  );
+
+  if (!globalEval.ok) {
+    lastReject = {
+      at: new Date().toISOString(),
+      reason: `[Global] ${globalEval.reason}`,
+      symbol: input.symbol,
+      strategyId: input.strategyId,
+    };
+    return globalEval;
   }
 
   return { ok: true };

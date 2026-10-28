@@ -5,7 +5,7 @@ import { BinanceAdapter } from './adapters/BinanceAdapter';
 import { BybitAdapter } from './adapters/BybitAdapter';
 import { MT5Adapter } from './adapters/MT5Adapter';
 import { ResolvedBrokerAccount, ResolveAccountOptions } from './account.types';
-import { executionModeOf } from './executionMode';
+import { executionModeOf, isPaperTradingForced } from './executionMode';
 import { BrokerId } from './engine.types';
 import { IBrokerAdapter } from './IBrokerAdapter';
 
@@ -37,7 +37,7 @@ function toResolved(account: BrokerAccount): ResolvedBrokerAccount {
 
 export class AccountResolver {
   async resolve(options: ResolveAccountOptions): Promise<ResolvedBrokerAccount> {
-    const { userId, brokerAccountId, brokerId, requireActive = false } = options;
+    const { userId, brokerAccountId, brokerId, requireActive = false, allowVirtualDemo = false } = options;
 
     if (brokerAccountId) {
       const account = await BrokerAccount.findOne({ where: { id: brokerAccountId, userId } });
@@ -66,6 +66,21 @@ export class AccountResolver {
     });
 
     if (!account) {
+      if (isPaperTradingForced() || allowVirtualDemo) {
+        return {
+          accountId: 0,
+          userId,
+          brokerId,
+          accountName: `Demo ${brokerId.toUpperCase()}`,
+          accountType: 'spot',
+          environment: 'testnet',
+          executionMode: 'demo',
+          externalRef: null,
+          status: 'active',
+          meta: { executionMode: 'demo', isVirtual: true },
+          credentials: { apiKey: '', apiSecret: '', passphrase: '', accessToken: '', refreshToken: '' },
+        };
+      }
       throw new Error(`No hay cuenta conectada de ${brokerId} para este usuario`);
     }
 
@@ -73,6 +88,9 @@ export class AccountResolver {
   }
 
   createAdapter(resolved: ResolvedBrokerAccount): IBrokerAdapter {
+    if (resolved.accountId === 0 || resolved.meta?.isVirtual) {
+      return this.createGlobalAdapter(resolved.brokerId);
+    }
     switch (resolved.brokerId) {
       case 'binance':
         return new BinanceAdapter({

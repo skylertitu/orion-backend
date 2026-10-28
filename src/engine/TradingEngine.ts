@@ -6,7 +6,8 @@ import { IBrokerAdapter } from './IBrokerAdapter';
 import { BrokerId, BrokerPosition, BrokerStatus, OrderResult, OrderSide, UnifiedOrder } from './engine.types';
 import { BrokerAccount, Trade } from '../models';
 import { engineLogger } from '../utils/logger';
-import { ExecutionMode } from './executionMode';
+import { ExecutionMode, isPaperTradingForced } from './executionMode';
+import { signedPnlRatio } from './pnl';
 
 class TradingEngine {
   private adapters = new Map<BrokerId, IBrokerAdapter>();
@@ -38,34 +39,61 @@ class TradingEngine {
         brokerAccountId: order.brokerAccountId,
         brokerId: order.broker,
         requireActive: true,
+        allowVirtualDemo: true,
       });
+      const executionMode = isPaperTradingForced() ? 'demo' : resolved.executionMode;
       return {
         adapter,
-        brokerAccountId: resolved.accountId,
-        executionMode: resolved.executionMode,
+        brokerAccountId: resolved.accountId || undefined,
+        executionMode,
         userId: resolved.userId,
       };
     }
 
-    return { adapter: this.getAdapter(order.broker), executionMode: 'live' };
+    const defaultMode: ExecutionMode = isPaperTradingForced() ? 'demo' : 'live';
+    return { adapter: this.getAdapter(order.broker), executionMode: defaultMode };
   }
 
   private async paperFill(order: UnifiedOrder, adapter: IBrokerAdapter, brokerAccountId?: number): Promise<OrderResult> {
     const symbol = order.symbol.toUpperCase();
-    const price = await adapter.getPrice(symbol).catch(() => 0);
+    const rawPrice = await adapter.getPrice(symbol).catch(() => 0);
+    if (!rawPrice || rawPrice <= 0) {
+      return {
+        success: false,
+        broker: order.broker,
+        symbol,
+        side: order.side,
+        error: `No se pudo obtener el precio de mercado para ${symbol} en ${order.broker}`,
+      };
+    }
+
+    const slippagePct = Number(process.env.PAPER_SLIPPAGE_PCT) || 0.0005; // 0.05%
+    const executedPrice =
+      order.side === 'buy'
+        ? rawPrice * (1 + slippagePct)
+        : rawPrice * (1 - slippagePct);
+
+    const feeRate = Number(process.env.PAPER_FEE_RATE) || 0.001; // 0.1% taker fee
+    const quantity = order.quantity ?? order.lot ?? 0;
+    const estimatedFeeUsd = executedPrice * quantity * feeRate;
+
     return {
       success: true,
       broker: order.broker,
-      ticket: `SIMULATED-${Date.now()}`,
+      ticket: `SIMULATED-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
       symbol,
       side: order.side,
       quantity: order.quantity,
       lot: order.lot,
-      executedPrice: price,
+      executedPrice,
       brokerAccountId,
       raw: {
         mode: 'demo',
-        message: 'Orden DEMO. No se envió al exchange. Pasa la cuenta a LIVE cuando quieras operar real.',
+        rawPrice,
+        slippagePct,
+        feeRate,
+        estimatedFeeUsd,
+        message: 'Orden DEMO ejecutada con simulación de precio real, deslizamiento y comisiones.',
       },
     };
   }
@@ -74,10 +102,14 @@ class TradingEngine {
     userId: number,
     adapter: IBrokerAdapter,
     brokerId: BrokerId,
-    brokerAccountId: number
+    brokerAccountId?: number
   ): Promise<BrokerPosition[]> {
     const trades = await Trade.findAll({
-      where: { userId, brokerAccountId, status: 'open' },
+      where: {
+        userId,
+        ...(brokerAccountId ? { brokerAccountId } : {}),
+        status: 'open',
+      },
       order: [['openedAt', 'DESC']],
     });
     const positions: BrokerPosition[] = [];
@@ -97,7 +129,7 @@ class TradingEngine {
         currentPrice: current,
         profit: delta * qty,
         comment: 'DEMO',
-        brokerAccountId,
+        brokerAccountId: trade.brokerAccountId || brokerAccountId,
       });
     }
     return positions;
@@ -118,29 +150,55 @@ class TradingEngine {
         ...(brokerAccountId ? { brokerAccountId } : {}),
       },
     });
+
     const symbol = trade?.symbol || '';
     const side = (trade?.side || 'sell') as OrderSide;
-    const exitPrice = symbol ? await adapter.getPrice(symbol).catch(() => Number(trade?.entryPrice || 0)) : 0;
+    const rawExitPrice = symbol ? await adapter.getPrice(symbol).catch(() => Number(trade?.entryPrice || 0)) : 0;
+    const slippagePct = Number(process.env.PAPER_SLIPPAGE_PCT) || 0.0005;
+    const closeSide: OrderSide = side === 'buy' ? 'sell' : 'buy';
+    const exitPrice =
+      closeSide === 'buy'
+        ? rawExitPrice * (1 + slippagePct)
+        : rawExitPrice * (1 - slippagePct);
+
+    let pnlPct = 0;
+    let pnlUsd = 0;
+    const feeRate = Number(process.env.PAPER_FEE_RATE) || 0.001;
+
     if (trade) {
       const entry = Number(trade.entryPrice) || 0;
-      const pnlPct = entry ? (side === 'sell' ? (entry - exitPrice) / entry : (exitPrice - entry) / entry) : 0;
+      const qty = Number(trade.quantity) || Number(trade.lot) || 0;
+      pnlPct = signedPnlRatio(side, entry, exitPrice);
+      const grossPnlUsd = side === 'sell' ? (entry - exitPrice) * qty : (exitPrice - entry) * qty;
+      const totalFeesUsd = (entry * qty + exitPrice * qty) * feeRate;
+      pnlUsd = grossPnlUsd - totalFeesUsd;
+
       await trade.update({
         status: 'closed',
         exitPrice,
         closedAt: new Date(),
         closeReason: 'demo_close',
         pnlPct,
+        raw: {
+          ...(trade.raw || {}),
+          exitPrice,
+          pnlPct,
+          pnlUsd,
+          totalFeesUsd,
+          closedMode: 'demo',
+        },
       });
     }
+
     return {
       success: true,
       broker: brokerId,
       ticket,
       symbol,
-      side,
+      side: closeSide,
       executedPrice: exitPrice,
       brokerAccountId,
-      raw: { mode: 'demo' },
+      raw: { mode: 'demo', pnlPct, pnlUsd },
     };
   }
 
@@ -318,6 +376,7 @@ class TradingEngine {
           brokerAccountId,
           brokerId,
           requireActive: true,
+          allowVirtualDemo: true,
         });
         if (resolved.executionMode === 'demo' || String(ticket).startsWith('SIMULATED-')) {
           return this.closePaperTrade(userId, ticket, adapter, brokerId, resolved.accountId);
@@ -326,6 +385,9 @@ class TradingEngine {
         result.brokerAccountId = resolved.accountId;
         return result;
       } catch (err: any) {
+        if (String(ticket).startsWith('SIMULATED-')) {
+          return this.closePaperTrade(userId, ticket, this.getAdapter(brokerId), brokerId, brokerAccountId);
+        }
         return {
           success: false,
           broker: brokerId,
@@ -347,12 +409,17 @@ class TradingEngine {
     brokerAccountId?: number
   ): Promise<number> {
     if (userId) {
-      const { adapter } = await accountResolver.resolveAdapter({
-        userId,
-        brokerAccountId,
-        brokerId,
-      });
-      return adapter.getPrice(symbol);
+      try {
+        const { adapter } = await accountResolver.resolveAdapter({
+          userId,
+          brokerAccountId,
+          brokerId,
+          allowVirtualDemo: true,
+        });
+        return await adapter.getPrice(symbol);
+      } catch {
+        return this.getAdapter(brokerId).getPrice(symbol);
+      }
     }
     return this.getAdapter(brokerId).getPrice(symbol);
   }

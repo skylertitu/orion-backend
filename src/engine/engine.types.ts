@@ -26,6 +26,8 @@ export interface UnifiedOrder {
   userId?: number;
   /** Cuenta conectada específica; si no se indica, usa la principal del broker */
   brokerAccountId?: number;
+  /** ID de idempotencia del cliente para evitar ejecuciones duplicadas en el exchange */
+  clientOrderId?: string;
 }
 
 /**

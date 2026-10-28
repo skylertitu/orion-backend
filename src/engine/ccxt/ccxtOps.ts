@@ -32,7 +32,11 @@ export async function ccxtMarketOrder(
   const symbol = toCcxtSymbol(order.symbol, marketTypeOf(exchange));
   const side = sideOf(order.side);
 
-  const created = await exchange.createOrder(symbol, 'market', side, qty);
+  const params: Record<string, unknown> = {};
+  if (order.clientOrderId) {
+    params.clientOrderId = order.clientOrderId;
+  }
+  const created = await exchange.createOrder(symbol, 'market', side, qty, undefined, params);
   return mapOrderResult(brokerId, created, side, qty);
 }
 

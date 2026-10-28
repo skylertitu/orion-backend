@@ -29,4 +29,5 @@ export interface ResolveAccountOptions {
   brokerAccountId?: number;
   brokerId?: BrokerId;
   requireActive?: boolean;
+  allowVirtualDemo?: boolean;
 }

@@ -269,7 +269,8 @@ export class BinanceAdapter implements IBrokerAdapter {
 
     try {
       const timestamp = Date.now();
-      const query = `symbol=${symbol}&side=${side}&type=MARKET&quantity=${quantity}&timestamp=${timestamp}`;
+      const clientOrderPart = order.clientOrderId ? `&newClientOrderId=${encodeURIComponent(order.clientOrderId)}` : '';
+      const query = `symbol=${symbol}&side=${side}&type=MARKET&quantity=${quantity}${clientOrderPart}&timestamp=${timestamp}`;
       const signature = await this._sign(query);
       const res = await fetch(`${this.baseUrl}/api/v3/order?${query}&signature=${signature}`, {
         method: 'POST',

@@ -12,6 +12,7 @@ import {
 import { WsKline } from '../services/binanceWs';
 import { binancePublicGet } from '../services/binancePublic';
 import { normalizeSymbol } from '../config/binance';
+import { signedPnlPct, evaluateRiskLimits } from '../engine/pnl';
 
 export interface BacktestTrade {
   side: 'buy' | 'sell';
@@ -20,6 +21,8 @@ export interface BacktestTrade {
   entryPrice: number;
   exitPrice: number;
   pnlPct: number;
+  rawPnlPct?: number;
+  feePct?: number;
   reason: string;
 }
 
@@ -31,6 +34,8 @@ export interface BacktestResult {
   trades: BacktestTrade[];
   winRate: number;
   totalPnlPct: number;
+  grossPnlPct: number;
+  totalFeesPct: number;
   maxDrawdownPct: number;
   via: 'ccxt' | 'binance_public';
 }
@@ -41,6 +46,8 @@ export interface BacktestRequest {
   interval?: string;
   limit?: number;
   config: StrategyConfig;
+  feeRate?: number;
+  slippagePct?: number;
 }
 
 function toKlines(
@@ -94,11 +101,6 @@ async function fetchCandles(
   return { rows, via: 'binance_public' };
 }
 
-function signedPnlPct(side: 'buy' | 'sell', entry: number, exit: number): number {
-  if (!entry) return 0;
-  return side === 'sell' ? ((entry - exit) / entry) * 100 : ((exit - entry) / entry) * 100;
-}
-
 export async function runBacktest(req: BacktestRequest): Promise<BacktestResult> {
   const broker = req.broker || 'binance';
   const symbol = (req.symbol || 'BTCUSDT').toUpperCase();
@@ -127,7 +129,13 @@ export async function runBacktest(req: BacktestRequest): Promise<BacktestResult>
   let side: 'buy' | 'sell' = 'buy';
   let entryPrice = 0;
   let entryTime = 0;
+  const feeRate = req.feeRate != null && req.feeRate >= 0 ? req.feeRate : 0.001;
+  const slippagePct = req.slippagePct != null && req.slippagePct >= 0 ? req.slippagePct : 0.05;
+  const roundtripFeePct = feeRate * 200;
+
   let equity = 0;
+  let grossEquity = 0;
+  let totalFees = 0;
   let peak = 0;
   let maxDrawdownPct = 0;
 
@@ -151,21 +159,25 @@ export async function runBacktest(req: BacktestRequest): Promise<BacktestResult>
     const price = ctx.currentPrice;
 
     if (inPosition) {
-      const pnl = signedPnlPct(side, entryPrice, price);
-      const hitSl = config.stop_loss_pct != null && pnl <= -Math.abs(config.stop_loss_pct);
-      const hitTp = config.take_profit_pct != null && pnl >= Math.abs(config.take_profit_pct);
-      if (signal.action === 'exit' || hitSl || hitTp) {
-        const reason = hitSl ? 'stop_loss' : hitTp ? 'take_profit' : signal.reason || 'exit';
+      const rawPnl = signedPnlPct(side, entryPrice, price);
+      const riskTrigger = evaluateRiskLimits(rawPnl, config.stop_loss_pct, config.take_profit_pct);
+      if (signal.action === 'exit' || riskTrigger) {
+        const netPnl = rawPnl - roundtripFeePct - slippagePct;
+        const reason = riskTrigger || signal.reason || 'exit';
         trades.push({
           side,
           entryTime,
           exitTime: ctx.timestamp,
           entryPrice,
           exitPrice: price,
-          pnlPct: Math.round(pnl * 100) / 100,
+          pnlPct: Math.round(netPnl * 100) / 100,
+          rawPnlPct: Math.round(rawPnl * 100) / 100,
+          feePct: Math.round((roundtripFeePct + slippagePct) * 100) / 100,
           reason,
         });
-        equity += pnl;
+        equity += netPnl;
+        grossEquity += rawPnl;
+        totalFees += roundtripFeePct + slippagePct;
         peak = Math.max(peak, equity);
         maxDrawdownPct = Math.max(maxDrawdownPct, peak - equity);
         inPosition = false;
@@ -180,17 +192,22 @@ export async function runBacktest(req: BacktestRequest): Promise<BacktestResult>
 
   if (inPosition && klines.length) {
     const last = klines[klines.length - 1];
-    const pnl = signedPnlPct(side, entryPrice, last.close);
+    const rawPnl = signedPnlPct(side, entryPrice, last.close);
+    const netPnl = rawPnl - roundtripFeePct - slippagePct;
     trades.push({
       side,
       entryTime,
       exitTime: last.openTime,
       entryPrice,
       exitPrice: last.close,
-      pnlPct: Math.round(pnl * 100) / 100,
+      pnlPct: Math.round(netPnl * 100) / 100,
+      rawPnlPct: Math.round(rawPnl * 100) / 100,
+      feePct: Math.round((roundtripFeePct + slippagePct) * 100) / 100,
       reason: 'end_of_series',
     });
-    equity += pnl;
+    equity += netPnl;
+    grossEquity += rawPnl;
+    totalFees += roundtripFeePct + slippagePct;
     peak = Math.max(peak, equity);
     maxDrawdownPct = Math.max(maxDrawdownPct, peak - equity);
   }
@@ -204,6 +221,8 @@ export async function runBacktest(req: BacktestRequest): Promise<BacktestResult>
     trades,
     winRate: trades.length ? Math.round((wins / trades.length) * 1000) / 10 : 0,
     totalPnlPct: Math.round(equity * 100) / 100,
+    grossPnlPct: Math.round(grossEquity * 100) / 100,
+    totalFeesPct: Math.round(totalFees * 100) / 100,
     maxDrawdownPct: Math.round(maxDrawdownPct * 100) / 100,
     via,
   };

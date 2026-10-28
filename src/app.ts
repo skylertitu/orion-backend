@@ -7,9 +7,7 @@ import sequelize from './config/database';
 import { cleanupOrphanTables } from './config/cleanupDatabase';
 import { initFirebaseAdmin } from './config/firebase';
 import './models';
-import { ensureWalletColumns } from './models/Wallet';
-import { ensureUserPlanColumn } from './models/User';
-import { ensureIndicatorCategoryColumn } from './models/Indicator';
+import { runMigrations } from './db/migrator';
 import routes from './routes';
 import { swaggerSpec } from './config/swagger';
 import { metatraderService } from './integrations/metatrader/mt.service';
@@ -78,26 +76,18 @@ if (process.env.NODE_ENV !== 'production') {
   );
   app.get('/api/docs.json', (_req, res) => res.json(swaggerSpec));
 }
+
+// Rutas API v1 (nuevo contrato)
+app.use('/api/v1', routes);
+app.use('/api/v1/worker', workerRoutes);
+
+// Rutas heredadas /api (retrocompatibilidad)
 app.use('/api', routes);
 app.use('/api/worker', workerRoutes);
 
 const workerCycleSeconds = parseInt(process.env.WORKER_CYCLE_SECONDS || '30', 10);
 const tradingWorker = new TradingWorker(workerCycleSeconds);
 setWorkerInstance(tradingWorker);
-
-async function syncDatabase(): Promise<void> {
-  const mode = (process.env.DB_SYNC || 'safe').toLowerCase();
-  if (mode === 'false' || mode === 'off') {
-    logger.info('[DB] Sync omitido (DB_SYNC=false)');
-    return;
-  }
-  if (mode === 'alter') {
-    logger.info('[DB] Sync con alter (puede tardar en Postgres remoto)...');
-    await sequelize.sync({ alter: true });
-    return;
-  }
-  await sequelize.sync();
-}
 
 const start = async () => {
   try {
@@ -106,11 +96,8 @@ const start = async () => {
     if (process.env.CLEANUP_ORPHAN_TABLES === 'true') {
       await cleanupOrphanTables();
     }
-    await syncDatabase();
-    await ensureWalletColumns();
-    await ensureUserPlanColumn();
-    await ensureIndicatorCategoryColumn();
-    logger.info('Models synchronized');
+    await runMigrations();
+    logger.info('Database schema and migrations synchronized');
     await ensureBootstrapAdmin();
     await ensureSystemControls();
     await ensureRiskSettings();
@@ -124,14 +111,18 @@ const start = async () => {
       logger.info(`Server running on port ${PORT}`);
       setupMarketWs(server);
 
-      const workerAllowed = process.env.WORKER_ENABLED !== 'false';
-      void isModuleEnabled('worker').then((flagOn) => {
-        if (workerAllowed && flagOn && !isPausedByRiskSync()) {
-          tradingWorker.start();
-        } else {
-          logger.info('[TradingWorker] Deshabilitado por entorno, control de admin o pausa de riesgo');
-        }
-      });
+      if (process.env.WORKER_STANDALONE === 'true') {
+        logger.info('[TradingWorker] Modo autónomo activado (WORKER_STANDALONE=true). El worker corre en su propio proceso.');
+      } else {
+        const workerAllowed = process.env.WORKER_ENABLED !== 'false';
+        void isModuleEnabled('worker').then((flagOn) => {
+          if (workerAllowed && flagOn && !isPausedByRiskSync()) {
+            tradingWorker.start();
+          } else {
+            logger.info('[TradingWorker] Deshabilitado por entorno, control de admin o pausa de riesgo');
+          }
+        });
+      }
 
       if (process.env.MT_ENABLED === 'true') {
         void metatraderService.connect();

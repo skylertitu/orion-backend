@@ -185,3 +185,86 @@ export const getPrice = async (req: Request, res: Response) => {
     res.status(500).json(response);
   }
 };
+
+export const handleKillSwitch = async (req: Request, res: Response) => {
+  const response: ApiResponse = { success: true };
+  try {
+    const user = (req as Request & { user?: { id: number; role?: string } }).user;
+    const { action, reason, closeAllPositions, targetUserId } = req.body;
+
+    const isAdmin = user?.role === 'admin' || user?.role === 'superadmin';
+    const effectiveUserId = isAdmin && targetUserId != null ? Number(targetUserId) : !isAdmin ? user?.id : undefined;
+
+    const { activateKillSwitch, deactivateKillSwitch } = await import('../services/killSwitch.service');
+
+    if (action === 'activate') {
+      const result = await activateKillSwitch({
+        userId: effectiveUserId,
+        reason: reason || (isAdmin ? 'Kill Switch activado por administrador' : 'Kill Switch activado por usuario'),
+        closeAllPositions: Boolean(closeAllPositions),
+        activatedBy: user?.id,
+      });
+      response.data = result;
+      response.message = 'Kill Switch activado con éxito';
+      return res.json(response);
+    } else if (action === 'deactivate') {
+      const result = await deactivateKillSwitch(effectiveUserId, user?.id);
+      response.data = result;
+      response.message = 'Kill Switch desactivado con éxito';
+      return res.json(response);
+    }
+
+    response.success = false;
+    response.error = '"action" debe ser "activate" o "deactivate"';
+    return res.status(400).json(response);
+  } catch (err: any) {
+    response.success = false;
+    response.error = err.message || 'Error en Kill Switch';
+    res.status(500).json(response);
+  }
+};
+
+export const getPaperSummary = async (req: Request, res: Response) => {
+  const response: ApiResponse = { success: true };
+  try {
+    const userId = getUserId(req);
+    if (!userId) {
+      response.success = false;
+      response.error = 'Usuario no autenticado';
+      return res.status(401).json(response);
+    }
+    const brokerAccountId = req.query.brokerAccountId ? Number(req.query.brokerAccountId) : undefined;
+    const { paperTradingService } = await import('../services/paperTrading.service');
+    response.data = await paperTradingService.getPaperSummary(userId, brokerAccountId);
+    res.json(response);
+  } catch (err: any) {
+    response.success = false;
+    response.error = err.message || 'Error al obtener resumen de paper trading';
+    res.status(500).json(response);
+  }
+};
+
+export const resetPaperAccount = async (req: Request, res: Response) => {
+  const response: ApiResponse = { success: true };
+  try {
+    const userId = getUserId(req);
+    if (!userId) {
+      response.success = false;
+      response.error = 'Usuario no autenticado';
+      return res.status(401).json(response);
+    }
+    const { brokerAccountId, newBalance } = req.body || {};
+    const { paperTradingService } = await import('../services/paperTrading.service');
+    response.data = await paperTradingService.resetPaperTrading(
+      userId,
+      brokerAccountId ? Number(brokerAccountId) : undefined,
+      newBalance ? Number(newBalance) : undefined
+    );
+    response.message = 'Cuenta Paper Trading reiniciada con éxito';
+    res.json(response);
+  } catch (err: any) {
+    response.success = false;
+    response.error = err.message || 'Error al reiniciar cuenta paper';
+    res.status(500).json(response);
+  }
+};
